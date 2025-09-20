@@ -68,31 +68,53 @@ def build_view_rotation(cam_pos, target, world_down=np.array([0.0, 1.0, 0.0], dt
     return R
 
 # Indices for MediaPipe FaceMesh (468 pts)
-# Common stable points: nose tip, chin, eye corners, mouth corners
+# A resilient set of landmarks for head pose estimation (eyes, nose, mouth, cheeks)
 LANDMARK_ORDER = [
     ("nose_tip", 1),
+    ("nose_bridge", 168),
     ("chin", 199),
     ("left_eye_outer", 33),
+    ("left_eye_inner", 133),
+    ("left_eye_upper", 159),
+    ("left_eye_lower", 145),
+    ("right_eye_inner", 362),
     ("right_eye_outer", 263),
-    ("left_mouth", 61),
-    ("right_mouth", 291),
+    ("right_eye_upper", 386),
+    ("right_eye_lower", 374),
+    ("mouth_left", 61),
+    ("mouth_right", 291),
+    ("mouth_upper", 13),
+    ("mouth_lower", 14),
+    ("left_cheek", 234),
+    ("right_cheek", 454),
 ]
 
 # Approximate 3D model coordinates (mm) for the chosen fiducials.
 MODEL_POINTS = np.array([
-    [0.0, 0.0, 0.0],             # nose tip
-    [0.0, -330.0, -65.0],        # chin
-    [-225.0, 170.0, -135.0],     # left eye outer corner
-    [225.0, 170.0, -135.0],      # right eye outer corner
-    [-150.0, -150.0, -125.0],    # left mouth corner
-    [150.0, -150.0, -125.0],     # right mouth corner
+    [0.0,   0.0,    0.0],    # nose tip
+    [0.0, 120.0,  -20.0],    # nose bridge between eyes
+    [0.0, -330.0, -65.0],    # chin
+    [-225.0, 170.0, -135.0], # left eye outer corner
+    [-100.0, 170.0, -125.0], # left eye inner corner
+    [-160.0, 210.0, -120.0], # left eye upper lid
+    [-160.0, 140.0, -120.0], # left eye lower lid
+    [100.0, 170.0, -125.0],  # right eye inner corner
+    [225.0, 170.0, -135.0],  # right eye outer corner
+    [160.0, 210.0, -120.0],  # right eye upper lid
+    [160.0, 140.0, -120.0],  # right eye lower lid
+    [-150.0, -150.0, -125.0],# left mouth corner
+    [150.0, -150.0, -125.0], # right mouth corner
+    [0.0,  -100.0, -110.0],  # upper lip midpoint
+    [0.0,  -190.0, -110.0],  # lower lip midpoint
+    [-320.0,  50.0,  -50.0], # left cheek
+    [320.0,   50.0,  -50.0], # right cheek
 ], dtype=np.float32)
 
 FACIAL_IDXS = dict(LANDMARK_ORDER)
 
 # Simple cube parameters (world space in millimetres; treat the cube centre as the world origin).
-CUBE_SIZE = 1000.0
-CUBE_DISTANCE = 0.0  # place the cube centre roughly 6 m in front of the real camera
+CUBE_SIZE = 100.0  # 10 cm per edge
+CUBE_DISTANCE = CUBE_SIZE / 2.0  # place the front face flush with the screen plane (z=0)
 CUBE_HALF = CUBE_SIZE / 2.0
 CUBE_CENTER = np.array([0.0, 0.0, CUBE_DISTANCE], dtype=np.float32)
 CUBE_POINTS = (np.float32([
@@ -112,7 +134,9 @@ CUBE_EDGES = [
 ]
 
 # Default virtual camera state used when no head pose is available
-DEFAULT_CAMERA_POS = np.array([0.0, 0.0, 4000.0], dtype=np.float32)
+# Scale factor mapping solvePnP translations to millimetres (500 mm real / 4000 mm observed)
+TRANSLATION_SCALE = 0.125
+DEFAULT_CAMERA_POS = np.array([0.0, 0.0, 500.0], dtype=np.float32)
 # Rate parameter for exponential decay towards `DEFAULT_CAMERA_POS` (1/s)
 RECENTER_LERP_RATE = 0.75
 
@@ -223,14 +247,18 @@ def main():
             )
             obj_pts = MODEL_POINTS
 
-            ok_pnp, rvec, tvec = cv2.solvePnP(
-                obj_pts, img_pts, K, dist, flags=cv2.SOLVEPNP_ITERATIVE
+            ok_pnp, rvec, tvec, inliers = cv2.solvePnPRansac(
+                obj_pts, img_pts, K, dist,
+                iterationsCount=100,
+                reprojectionError=8.0,
+                confidence=0.99,
+                flags=cv2.SOLVEPNP_EPNP,
             )
 
-            if ok_pnp:
-                raw_x = float(tvec[0, 0])
-                raw_y = float(tvec[1, 0])
-                raw_z = float(tvec[2, 0])
+            if ok_pnp and inliers is not None and len(inliers) >= 6:
+                raw_x = float(tvec[0, 0]) * TRANSLATION_SCALE
+                raw_y = -float(tvec[1, 0]) * TRANSLATION_SCALE  # convert image-space +Y down to world-space +Y up
+                raw_z = float(tvec[2, 0]) * TRANSLATION_SCALE
 
                 if not prev_face_visible:
                     smooth["x"].reset(raw_x, frame_time)
@@ -242,7 +270,7 @@ def main():
                 z_filtered = float(smooth["z"].filter(raw_z, frame_time))
 
                 cam_pos_display = np.array([x_filtered, y_filtered, z_filtered], dtype=np.float32)
-                pose_text = f"x={x_filtered:+.1f}  y={-y_filtered:+.1f}  z={z_filtered:+.1f}"
+                pose_text = f"x={x_filtered:+.1f}  y={y_filtered:+.1f}  z={z_filtered:+.1f}"
                 detection_success = True
 
         if not detection_success:
