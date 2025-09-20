@@ -9,37 +9,14 @@ import math
 import mediapipe as mp
 import pygame
 
-# ---------- 1-Euro filter (per-signal smoothing; low lag) ----------
-class OneEuro:
-    def __init__(self, min_cutoff=1.0, beta=0.02, dcutoff=1.0):
-        self.min_cutoff, self.beta, self.dcutoff = min_cutoff, beta, dcutoff
-        self.t_prev = None
-        self.x_prev = None
-        self.dx_prev = 0.0
-
-    @staticmethod
-    def _alpha(cutoff, dt):
-        tau = 1.0 / (2.0 * math.pi * cutoff)
-        return 1.0 / (1.0 + tau / dt)
-
-    def filter(self, x, t):
-        if self.t_prev is None:
-            self.t_prev, self.x_prev = t, x
-            return x
-        dt = max(1e-6, t - self.t_prev)
-        self.t_prev = t
-        dx = (x - self.x_prev) / dt
-        a_d = self._alpha(self.dcutoff, dt)
-        dx_hat = a_d * dx + (1 - a_d) * self.dx_prev
-        self.dx_prev = dx_hat
-        cutoff = self.min_cutoff + self.beta * abs(dx_hat)
-        a = self._alpha(cutoff, dt)
-        x_hat = a * x + (1 - a) * self.x_prev
-        self.x_prev = x_hat
-        return x_hat
+from one_euro import OneEuro
 
 # ---------- Pose helpers ----------
-def rvec_tvec_to_ypr(rvec):
+def rotation_vector_to_ypr(rvec):
+    """Return yaw/pitch/roll (degrees) given a Rodrigues rotation vector.
+
+    Assumes OpenCV camera coordinates (+X right, +Y down, +Z forward).
+    """
     R, _ = cv2.Rodrigues(rvec)
     # OpenCV camera coords: +X right, +Y down, +Z forward
     sy = math.sqrt(R[0,0]**2 + R[1,0]**2)
@@ -134,6 +111,11 @@ CUBE_EDGES = [
     (0, 4), (1, 5), (2, 6), (3, 7),
 ]
 
+# Default virtual camera state used when no head pose is available
+DEFAULT_CAMERA_POS = np.array([0.0, 0.0, 4000.0], dtype=np.float32)
+# Rate parameter for exponential decay towards `DEFAULT_CAMERA_POS` (1/s)
+RECENTER_LERP_RATE = 0.75
+
 # --- Display helpers ---
 
 def resize_cover(img, dst_w, dst_h):
@@ -191,8 +173,11 @@ def main():
     # Smoothers for each DOF
     smooth = {k: OneEuro(0.1, 0.01, 1.0) for k in ["x", "y", "z"]}
 
+    cam_pos_display = DEFAULT_CAMERA_POS.copy()
+    face_visible = False
     fps_avg = None
     t_prev = time.time()
+    motion_t_prev = t_prev
 
     running = True
     while running:
@@ -214,7 +199,20 @@ def main():
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = mp_face.process(rgb)
 
+        prev_face_visible = face_visible
+        frame_time = time.time()
+        dt_motion = max(0.0, frame_time - motion_t_prev)
+
         pose_text = "No face"
+        detection_success = False
+
+        # Camera intrinsics (simple guess; good enough to start)
+        f = w  # focal length ~ width in pixels
+        K = np.array([[f, 0, w/2],
+                      [0, f, h/2],
+                      [0, 0, 1]], dtype=np.float32)
+        dist = np.zeros((4, 1), dtype=np.float32)
+
         if res.multi_face_landmarks:
             lm2d = res.multi_face_landmarks[0].landmark
 
@@ -225,43 +223,56 @@ def main():
             )
             obj_pts = MODEL_POINTS
 
-            # Camera intrinsics (simple guess; good enough to start)
-            f = w  # focal length ~ width in pixels
-            K = np.array([[f, 0, w/2],
-                          [0, f, h/2],
-                          [0, 0, 1]], dtype=np.float32)
-            dist = np.zeros((4, 1), dtype=np.float32)
-
             ok_pnp, rvec, tvec = cv2.solvePnP(
                 obj_pts, img_pts, K, dist, flags=cv2.SOLVEPNP_ITERATIVE
             )
 
             if ok_pnp:
-                t_now = time.time()
-                x = float(smooth["x"].filter(tvec[0,0], t_now))
-                y = -float(smooth["y"].filter(tvec[1,0], t_now))
-                z = float(smooth["z"].filter(tvec[2,0], t_now))
-                pose_text = f"x={x:+.1f}  y={y:+.1f}  z={z:+.1f}"
+                raw_x = float(tvec[0, 0])
+                raw_y = float(tvec[1, 0])
+                raw_z = float(tvec[2, 0])
 
-                # Render the virtual cube using a look-at camera that always targets the cube centre
-                cam_pos = np.array([x, -y, z], dtype=np.float32)
-                view_R = build_view_rotation(cam_pos, CUBE_CENTER)
-                view_t = -view_R @ cam_pos
-                view_rvec, _ = cv2.Rodrigues(view_R)
+                if not prev_face_visible:
+                    smooth["x"].reset(raw_x, frame_time)
+                    smooth["y"].reset(raw_y, frame_time)
+                    smooth["z"].reset(raw_z, frame_time)
 
-                view_rvec = view_rvec.astype(np.float32)
-                view_t = view_t.astype(np.float32).reshape(3, 1)
+                x_filtered = float(smooth["x"].filter(raw_x, frame_time))
+                y_filtered = float(smooth["y"].filter(raw_y, frame_time))
+                z_filtered = float(smooth["z"].filter(raw_z, frame_time))
 
-                cube_img, _ = cv2.projectPoints(CUBE_POINTS, view_rvec, view_t, K, dist)
-                cube_pixels = np.rint(cube_img.reshape(-1, 2)).astype(int)
+                cam_pos_display = np.array([x_filtered, y_filtered, z_filtered], dtype=np.float32)
+                pose_text = f"x={x_filtered:+.1f}  y={-y_filtered:+.1f}  z={z_filtered:+.1f}"
+                detection_success = True
 
-                for idx0, idx1 in CUBE_EDGES:
-                    p0 = tuple(cube_pixels[idx0])
-                    p1 = tuple(cube_pixels[idx1])
-                    cv2.line(canvas, p0, p1, (120, 200, 255), 2)
+        if not detection_success:
+            lerp = 1.0 - math.exp(-RECENTER_LERP_RATE * dt_motion)
+            lerp = float(min(max(lerp, 0.0), 1.0))
+            cam_pos_display = cam_pos_display + (DEFAULT_CAMERA_POS - cam_pos_display) * lerp
+            cam_pos_display = cam_pos_display.astype(np.float32)
 
-                for pt in cube_pixels:
-                    cv2.circle(canvas, tuple(pt), 3, (200, 200, 200), -1)
+        face_visible = detection_success
+
+        # Render the virtual cube using a look-at camera that always targets the cube centre
+        view_R = build_view_rotation(cam_pos_display, CUBE_CENTER)
+        view_t = -view_R @ cam_pos_display
+        view_rvec, _ = cv2.Rodrigues(view_R)
+
+        view_rvec = view_rvec.astype(np.float32)
+        view_t = view_t.astype(np.float32).reshape(3, 1)
+
+        cube_img, _ = cv2.projectPoints(CUBE_POINTS, view_rvec, view_t, K, dist)
+        cube_pixels = np.rint(cube_img.reshape(-1, 2)).astype(int)
+
+        for idx0, idx1 in CUBE_EDGES:
+            p0 = tuple(cube_pixels[idx0])
+            p1 = tuple(cube_pixels[idx1])
+            cv2.line(canvas, p0, p1, (120, 200, 255), 2)
+
+        for pt in cube_pixels:
+            cv2.circle(canvas, tuple(pt), 3, (200, 200, 200), -1)
+
+        motion_t_prev = frame_time
 
         # FPS
         t_now = time.time()
