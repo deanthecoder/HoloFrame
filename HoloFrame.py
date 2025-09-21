@@ -13,13 +13,6 @@ from direct.task import Task
 from panda3d.core import (
     AmbientLight,
     DirectionalLight,
-    Geom,
-    GeomNode,
-    GeomTriangles,
-    GeomVertexData,
-    GeomVertexFormat,
-    GeomVertexWriter,
-    NodePath,
     VirtualFileSystem,
     getModelPath,
     TextNode,
@@ -107,27 +100,38 @@ class HoloFrameApp(ShowBase):
         self.taskMgr.add(self._update_task, "holoframe-update")
 
     def _build_scene(self) -> None:
-        cube_size_m = max(1e-3, self.app_config.cube_size_mm / 1000.0)
+        target_size_m = max(1e-3, self.app_config.model_max_size_mm / 1000.0)
 
         scene_root = self.render.attachNewNode("holoframe-scene")
-        cube_root = scene_root.attachNewNode("cube-root")
+        model_root = scene_root.attachNewNode("cube-root")
 
-        cube_geom = self.loader.loadModel("models/box")
-        if cube_geom.isEmpty():
-            cube_geom = self._create_unit_cube()
+        model = self.loader.loadModel(self.app_config.model_path)
+        if model.isEmpty():
+            raise RuntimeError(
+                f"Failed to load model '{self.app_config.model_path}'. Update config.model_path to a valid Panda3D model."
+            )
 
-        cube_geom.reparentTo(cube_root)
+        model.reparentTo(model_root)
 
-        min_bound, max_bound = cube_geom.getTightBounds()
-        if min_bound is not None and max_bound is not None:
-            center = (min_bound + max_bound) * 0.5
-            cube_geom.setPos(-center)
+        min_bound, max_bound = model.getTightBounds()
+        if min_bound is None or max_bound is None:
+            raise RuntimeError(f"Failed to compute bounds for model '{self.app_config.model_path}'")
 
-        cube_root.setScale(cube_size_m)
-        cube_root.setColor(0.25, 0.6, 0.95, 1.0)
-        cube_root.setShaderAuto()
+        center = (min_bound + max_bound) * 0.5
+        size = max_bound - min_bound
+        model.setPos(-center)
 
-        cube_root.setPos(0.0, -cube_size_m * 0.5, 0.0)
+        max_dim = max(size.x, size.y, size.z, 1e-6)
+        scale_factor = target_size_m / max_dim
+        model_root.setScale(scale_factor)
+
+        depth_half = (size.y * 0.5) * scale_factor
+        model_root.setPos(0.0, -depth_half, 0.0)
+
+        if self.app_config.model_path == "models/box":
+            model_root.setColor(0.25, 0.6, 0.95, 1.0)
+
+        model_root.setShaderAuto()
 
         ambient = AmbientLight("ambient")
         ambient.setColor(Vec4(0.12, 0.12, 0.16, 1.0))
@@ -143,7 +147,7 @@ class HoloFrameApp(ShowBase):
         self.render.setLight(key_node)
 
         self._scene_root = scene_root
-        self._cube_node = cube_root
+        self._cube_node = model_root
 
     def _log_available_models(self) -> None:
         vfs = VirtualFileSystem.getGlobalPtr()

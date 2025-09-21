@@ -6,7 +6,8 @@ from typing import Tuple
 class AppConfig:
     translation_scale: float = 0.125
     recenter_lerp_rate: float = 0.75
-    cube_size_mm: float = 100.0
+    model_max_size_mm: float = 150.0
+    model_path: str = "models/teapot"
     default_camera_pos_mm: Tuple[float, float, float] = (0.0, 0.0, 500.0)
     smoothing_min_cutoff: float = 0.1
     smoothing_beta: float = 0.01
@@ -14,4 +15,8 @@ class AppConfig:
 
     @property
     def cube_distance_mm(self) -> float:
-        return self.cube_size_mm / 2.0
+        return self.model_max_size_mm / 2.0
+
+    @property
+    def cube_size_mm(self) -> float:
+        return self.model_max_size_mm
