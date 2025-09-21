@@ -13,6 +13,14 @@ from direct.task import Task
 from panda3d.core import (
     AmbientLight,
     DirectionalLight,
+    Geom,
+    GeomNode,
+    GeomTriangles,
+    GeomVertexData,
+    GeomVertexFormat,
+    GeomVertexWriter,
+    PerspectiveLens,
+    Spotlight,
     VirtualFileSystem,
     getModelPath,
     TextNode,
@@ -28,6 +36,7 @@ from rendering import CubeRenderer
 
 
 class HoloFrameApp(ShowBase):
+    """Main Panda3D application that renders the tracked model inside a room."""
     def __init__(self) -> None:
         ShowBase.__init__(self)
 
@@ -52,13 +61,30 @@ class HoloFrameApp(ShowBase):
             props.setSize(display_w, display_h)
             props.setFullscreen(True)
         else:
-            props.setSize(800, 600)
-            props.setFullscreen(False)
+            raise RuntimeError("Display size is not available from the graphics pipe")
 
         if self.win is not None:
             self.win.requestProperties(props)
 
         self.app_config = AppConfig()
+
+        target_size_m = max(1e-3, self.app_config.model_max_size_mm / 1000.0)
+        self.room_width = target_size_m * 2.0
+        self.room_height = target_size_m * 2.0
+        self.room_depth = target_size_m * 3.0
+        self._room_dimension_step = 0.1
+        self._room_depth_step = 0.1
+        self._room_min_width = 0.3
+        self._room_min_height = 0.3
+        self._room_min_depth = 0.3
+        self._spotlight_node = None
+
+        self.accept("arrow_left", self._decrease_room_width)
+        self.accept("arrow_right", self._increase_room_width)
+        self.accept("arrow_down", self._decrease_room_height)
+        self.accept("arrow_up", self._increase_room_height)
+        self.accept("l", self._decrease_room_depth)
+        self.accept("p", self._increase_room_depth)
 
         self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
@@ -81,7 +107,7 @@ class HoloFrameApp(ShowBase):
             pos=(-1.3, 0.93),
             align=TextNode.ALeft,
             fg=(0.95, 0.95, 0.95, 1.0),
-            scale=0.05,
+            scale=0.025,
             mayChange=True,
         )
         self.fps_text = OnscreenText(
@@ -89,7 +115,15 @@ class HoloFrameApp(ShowBase):
             pos=(-1.3, 0.85),
             align=TextNode.ALeft,
             fg=(0.8, 0.8, 1.0, 1.0),
-            scale=0.05,
+            scale=0.025,
+            mayChange=True,
+        )
+        self.room_text = OnscreenText(
+            text="Room: --",
+            pos=(-1.3, 0.77),
+            align=TextNode.ALeft,
+            fg=(0.9, 0.9, 0.9, 1.0),
+            scale=0.025,
             mayChange=True,
         )
 
@@ -100,6 +134,7 @@ class HoloFrameApp(ShowBase):
         self.taskMgr.add(self._update_task, "holoframe-update")
 
     def _build_scene(self) -> None:
+        """Load the primary model and construct lighting and room geometry."""
         target_size_m = max(1e-3, self.app_config.model_max_size_mm / 1000.0)
 
         scene_root = self.render.attachNewNode("holoframe-scene")
@@ -134,11 +169,11 @@ class HoloFrameApp(ShowBase):
         model_root.setShaderAuto()
 
         ambient = AmbientLight("ambient")
-        ambient.setColor(Vec4(0.12, 0.12, 0.16, 1.0))
+        ambient.setColor(Vec4(0.24, 0.24, 0.30, 1.0) * 0.5)
         ambient_node = scene_root.attachNewNode(ambient)
 
         key = DirectionalLight("key")
-        key.setColor(Vec4(0.9, 0.9, 0.9, 1.0))
+        key.setColor(Vec4(0.9, 0.9, 0.9, 1.0) * 0.75)
         key.setDirection(Vec3(0.0, 1.0, -0.2))
         key_node = scene_root.attachNewNode(key)
 
@@ -146,8 +181,168 @@ class HoloFrameApp(ShowBase):
         self.render.setLight(ambient_node)
         self.render.setLight(key_node)
 
+        spot_light = Spotlight("ceiling-spot")
+        spot_light.setColor(Vec4(1.0, 0.95, 0.85, 1.0) * 2.5)
+        spot_lens = PerspectiveLens()
+        spot_lens.setFov(60.0)
+        spot_lens.setNearFar(0.01, 50.0)  # Allow the spotlight to illuminate close geometry.
+        spot_light.setLens(spot_lens)
+        self._spotlight_node = scene_root.attachNewNode(spot_light)
+        self.render.setLight(self._spotlight_node)
+
+        self._room_node = scene_root.attachNewNode("cornell-room")
+        self._rebuild_room_geometry()
+        self._update_room_lighting()
+
         self._scene_root = scene_root
         self._cube_node = model_root
+
+    def _make_panel(self, name: str, corners, normal) -> GeomNode:
+        """Create a rectangular panel geometry from four corner points and a normal."""
+        vertex_format = GeomVertexFormat.getV3n3()
+        vertex_data = GeomVertexData(name, vertex_format, Geom.UHStatic)
+        vertex_data.setNumRows(4)
+
+        vertex_writer = GeomVertexWriter(vertex_data, "vertex")
+        normal_writer = GeomVertexWriter(vertex_data, "normal")
+
+        for corner in corners:
+            vertex_writer.addData3f(*corner)
+            normal_writer.addData3f(*normal)
+
+        triangles = GeomTriangles(Geom.UHStatic)
+        triangles.addVertices(0, 1, 2)
+        triangles.addVertices(0, 2, 3)
+
+        geom = Geom(vertex_data)
+        geom.addPrimitive(triangles)
+
+        panel = GeomNode(name)
+        panel.addGeom(geom)
+        return panel
+
+    def _rebuild_room_geometry(self) -> None:
+        """Regenerate the Cornell-box style room based on the current dimensions."""
+        if getattr(self, "_room_node", None) is None:
+            return
+
+        for child in self._room_node.getChildren():
+            child.removeNode()
+
+        width = max(self._room_min_width, float(self.room_width))
+        height = max(self._room_min_height, float(self.room_height))
+        depth = max(self._room_min_depth, float(self.room_depth))
+
+        half_w = width * 0.5
+        half_h = height * 0.5
+
+        floor_corners = [
+            (-half_w, 0.0, -half_h),
+            (half_w, 0.0, -half_h),
+            (half_w, depth, -half_h),
+            (-half_w, depth, -half_h),
+        ]
+        ceiling_corners = [
+            (-half_w, depth, half_h),
+            (half_w, depth, half_h),
+            (half_w, 0.0, half_h),
+            (-half_w, 0.0, half_h),
+        ]
+        left_wall_corners = [
+            (-half_w, 0.0, -half_h),
+            (-half_w, depth, -half_h),
+            (-half_w, depth, half_h),
+            (-half_w, 0.0, half_h),
+        ]
+        right_wall_corners = [
+            (half_w, 0.0, half_h),
+            (half_w, depth, half_h),
+            (half_w, depth, -half_h),
+            (half_w, 0.0, -half_h),
+        ]
+        back_wall_corners = [
+            (-half_w, depth, half_h),
+            (-half_w, depth, -half_h),
+            (half_w, depth, -half_h),
+            (half_w, depth, half_h),
+        ]
+
+        floor = self._room_node.attachNewNode(
+            self._make_panel("room-floor", floor_corners, (0.0, 0.0, 1.0))
+        )
+        floor.setColor(0.7, 0.7, 0.7, 1.0)
+
+        ceiling = self._room_node.attachNewNode(
+            self._make_panel("room-ceiling", ceiling_corners, (0.0, 0.0, -1.0))
+        )
+        ceiling.setColor(0.8, 0.8, 0.8, 1.0)
+
+        left_wall = self._room_node.attachNewNode(
+            self._make_panel("room-left", left_wall_corners, (1.0, 0.0, 0.0))
+        )
+        left_wall.setColor(0.63, 0.06, 0.06, 1.0)
+
+        right_wall = self._room_node.attachNewNode(
+            self._make_panel("room-right", right_wall_corners, (-1.0, 0.0, 0.0))
+        )
+        right_wall.setColor(0.16, 0.6, 0.18, 1.0)
+
+        back_wall = self._room_node.attachNewNode(
+            self._make_panel("room-back", back_wall_corners, (0.0, -1.0, 0.0))
+        )
+        back_wall.setColor(0.8, 0.8, 0.8, 1.0)
+
+        self._update_room_lighting()
+
+    def _set_room_width(self, width: float) -> None:
+        """Apply a new room width value and rebuild the geometry."""
+        self.room_width = max(self._room_min_width, float(width))
+        self._rebuild_room_geometry()
+
+    def _set_room_height(self, height: float) -> None:
+        """Apply a new room height value and rebuild the geometry."""
+        self.room_height = max(self._room_min_height, float(height))
+        self._rebuild_room_geometry()
+
+    def _set_room_depth(self, depth: float) -> None:
+        """Apply a new room depth value and rebuild the geometry."""
+        self.room_depth = max(self._room_min_depth, float(depth))
+        self._rebuild_room_geometry()
+
+    def _increase_room_width(self) -> None:
+        """Handle keyboard input to widen the room."""
+        self._set_room_width(self.room_width + self._room_dimension_step)
+
+    def _decrease_room_width(self) -> None:
+        """Handle keyboard input to narrow the room."""
+        self._set_room_width(self.room_width - self._room_dimension_step)
+
+    def _increase_room_height(self) -> None:
+        """Handle keyboard input to raise the ceiling."""
+        self._set_room_height(self.room_height + self._room_dimension_step)
+
+    def _decrease_room_height(self) -> None:
+        """Handle keyboard input to lower the ceiling."""
+        self._set_room_height(self.room_height - self._room_dimension_step)
+
+    def _increase_room_depth(self) -> None:
+        """Handle keyboard input to push the back wall farther away."""
+        self._set_room_depth(self.room_depth + self._room_depth_step)
+
+    def _decrease_room_depth(self) -> None:
+        """Handle keyboard input to pull the back wall closer."""
+        self._set_room_depth(self.room_depth - self._room_depth_step)
+
+    def _update_room_lighting(self) -> None:
+        """Reposition the ceiling spotlight so it stays centered above the room."""
+        if self._spotlight_node is None:
+            raise RuntimeError("Spotlight node is not set")
+
+        height = max(self._room_min_height, float(self.room_height))
+        depth = max(self._room_min_depth, float(self.room_depth))
+
+        self._spotlight_node.setPos(0.0, depth * -0.5, height * 0.5)
+        self._spotlight_node.lookAt(0.0, depth * 0.5, height * -0.5)
 
     def _log_available_models(self) -> None:
         vfs = VirtualFileSystem.getGlobalPtr()
@@ -248,6 +443,13 @@ class HoloFrameApp(ShowBase):
         self._apply_camera_pose(self.cam_pos_display)
 
         self.fps_text.setText(f"FPS: {self.fps_avg:.1f}")
+
+        width = max(self._room_min_width, float(self.room_width))
+        height = max(self._room_min_height, float(self.room_height))
+        depth = max(self._room_min_depth, float(self.room_depth))
+        self.room_text.setText(
+            f"Room W:{width:.2f}m  H:{height:.2f}m  D:{depth:.2f}m"
+        )
 
         return Task.cont
 
