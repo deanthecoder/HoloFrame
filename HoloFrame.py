@@ -1,123 +1,276 @@
 # Setup:
 #   python -m pip install --upgrade pip
-#   pip install opencv-python mediapipe numpy pygame
+#   pip install opencv-python mediapipe numpy panda3d
 
 import cv2
 import numpy as np
 import time
 import math
-import pygame
+
+from direct.showbase.ShowBase import ShowBase
+from direct.gui.OnscreenText import OnscreenText
+from direct.task import Task
+from panda3d.core import (
+    AmbientLight,
+    DirectionalLight,
+    Geom,
+    GeomNode,
+    GeomTriangles,
+    GeomVertexData,
+    GeomVertexFormat,
+    GeomVertexWriter,
+    NodePath,
+    VirtualFileSystem,
+    getModelPath,
+    TextNode,
+    Vec3,
+    Vec4,
+    WindowProperties,
+    loadPrcFileData,
+)
 
 from config import AppConfig
 from head_pose_tracker import HeadPoseTracker
 from rendering import CubeRenderer
 
 
-# ---------- Main ----------
-def main():
-    config = AppConfig()
+class HoloFrameApp(ShowBase):
+    def __init__(self) -> None:
+        ShowBase.__init__(self)
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        raise RuntimeError("Webcam not found")
+        self.disableMouse()
+        self.setBackgroundColor(0, 0, 0)
+        self.accept("escape", self._handle_exit)
 
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
+        if self.camLens is not None:
+            self.camLens.setNearFar(0.001, 1000.0)
 
-    pygame.init()
-    pygame.display.set_caption("HoloFrame (ESC to quit)")
-    display_info = pygame.display.Info()
-    win_w, win_h = display_info.current_w, display_info.current_h
-    if win_w <= 0 or win_h <= 0:
-        win_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
-        win_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
-    screen = pygame.display.set_mode((win_w, win_h), pygame.FULLSCREEN)
+        if self.win is not None:
+            self.win.setCloseRequestEvent("holoframe-close")
+            self.accept("holoframe-close", self._handle_exit)
 
-    cap_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
-    cap_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 360
-    scale = min(win_w / max(1, cap_w), win_h / max(1, cap_h))
-    if scale <= 0:
-        scale = 1.0
-    disp_w = max(1, min(win_w, int(round(cap_w * scale))))
-    disp_h = max(1, min(win_h, int(round(cap_h * scale))))
-    frame_surface = pygame.Surface((disp_w, disp_h))
+        props = WindowProperties()
+        props.setTitle("HoloFrame (ESC to quit)")
+        props.setUndecorated(True)
 
-    tracker = HeadPoseTracker(config)
-    cube_renderer = CubeRenderer(config)
+        display_w = self.pipe.getDisplayWidth() if self.pipe else 0
+        display_h = self.pipe.getDisplayHeight() if self.pipe else 0
+        if display_w > 0 and display_h > 0:
+            props.setSize(display_w, display_h)
+            props.setFullscreen(True)
+        else:
+            props.setSize(800, 600)
+            props.setFullscreen(False)
 
-    default_cam_pos = np.array(config.default_camera_pos_mm, dtype=np.float32)
-    cam_pos_display = default_cam_pos.copy()
-    fps_avg = None
-    t_prev = time.time()
-    motion_t_prev = t_prev
+        if self.win is not None:
+            self.win.requestProperties(props)
 
-    running = True
-    while running:
-        ok, frame = cap.read()
+        self.app_config = AppConfig()
+
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            raise RuntimeError("Webcam not found")
+
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
+
+        self.tracker = HeadPoseTracker(self.app_config)
+        self.cube_renderer = CubeRenderer(self.app_config)
+
+        self.default_cam_pos = np.array(self.app_config.default_camera_pos_mm, dtype=np.float32)
+        self.cam_pos_display = self.default_cam_pos.copy()
+        self.fps_avg = None
+        self.t_prev = time.time()
+        self.motion_t_prev = self.t_prev
+
+        self.pose_text = OnscreenText(
+            text="Initializing pose",
+            pos=(-1.3, 0.93),
+            align=TextNode.ALeft,
+            fg=(0.95, 0.95, 0.95, 1.0),
+            scale=0.05,
+            mayChange=True,
+        )
+        self.fps_text = OnscreenText(
+            text="FPS: --",
+            pos=(-1.3, 0.85),
+            align=TextNode.ALeft,
+            fg=(0.8, 0.8, 1.0, 1.0),
+            scale=0.05,
+            mayChange=True,
+        )
+
+        self._log_available_models()
+        self._build_scene()
+        self._apply_camera_pose(self.cam_pos_display)
+
+        self.taskMgr.add(self._update_task, "holoframe-update")
+
+    def _build_scene(self) -> None:
+        cube_size_m = max(1e-3, self.app_config.cube_size_mm / 1000.0)
+
+        scene_root = self.render.attachNewNode("holoframe-scene")
+        cube_root = scene_root.attachNewNode("cube-root")
+
+        cube_geom = self.loader.loadModel("models/box")
+        if cube_geom.isEmpty():
+            cube_geom = self._create_unit_cube()
+
+        cube_geom.reparentTo(cube_root)
+
+        min_bound, max_bound = cube_geom.getTightBounds()
+        if min_bound is not None and max_bound is not None:
+            center = (min_bound + max_bound) * 0.5
+            cube_geom.setPos(-center)
+
+        cube_root.setScale(cube_size_m)
+        cube_root.setColor(0.25, 0.6, 0.95, 1.0)
+        cube_root.setShaderAuto()
+
+        cube_root.setPos(0.0, -cube_size_m * 0.5, 0.0)
+
+        ambient = AmbientLight("ambient")
+        ambient.setColor(Vec4(0.12, 0.12, 0.16, 1.0))
+        ambient_node = scene_root.attachNewNode(ambient)
+
+        key = DirectionalLight("key")
+        key.setColor(Vec4(0.9, 0.9, 0.9, 1.0))
+        key.setDirection(Vec3(0.0, 1.0, -0.2))
+        key_node = scene_root.attachNewNode(key)
+
+        self.render.clearLight()
+        self.render.setLight(ambient_node)
+        self.render.setLight(key_node)
+
+        self._scene_root = scene_root
+        self._cube_node = cube_root
+
+    def _log_available_models(self) -> None:
+        vfs = VirtualFileSystem.getGlobalPtr()
+        model_path = getModelPath()
+        found = set()
+
+        def scan(directory, prefix: str) -> None:
+            if directory.empty():
+                return
+            file_list = vfs.scanDirectory(directory)
+            if file_list is None:
+                return
+            for i in range(file_list.getNumFiles()):
+                vfile = file_list.getFile(i)
+                filename = vfile.getFilename()
+                basename = filename.getBasename()
+                if vfile.isDirectory():
+                    scan(filename, prefix + basename + "/")
+                    continue
+                name_lower = basename.lower()
+                if name_lower.endswith((".egg", ".bam", ".egg.pz", ".bam.pz")):
+                    trimmed = basename
+                    if trimmed.lower().endswith(".pz"):
+                        trimmed = trimmed[:-3]
+                    if trimmed.lower().endswith(".egg"):
+                        trimmed = trimmed[:-4]
+                    elif trimmed.lower().endswith(".bam"):
+                        trimmed = trimmed[:-4]
+                    found.add(prefix + trimmed)
+
+        for i in range(model_path.getNumDirectories()):
+            scan(model_path.getDirectory(i), "")
+
+        if not found:
+            print("[HoloFrame] No Panda3D models found on model-path")
+            return
+
+        print("[HoloFrame] Panda3D models available:")
+        for name in sorted(found):
+            print(f"  - {name}")
+
+    def _apply_camera_pose(self, cam_pos_mm: np.ndarray) -> None:
+        pos = cam_pos_mm.astype(np.float32)
+        x_m = -float(pos[0]) * 0.001
+        y_m = -float(pos[2]) * 0.001
+        z_m = -float(pos[1]) * 0.001
+
+        if y_m > -0.05:
+            y_m = -0.05
+
+        self.camera.setPos(x_m, y_m, z_m)
+        self.camera.lookAt(0.0, 0.0, 0.0)
+
+    def _update_task(self, task: Task) -> int:
+        ok, frame = self.cap.read()
         if not ok:
-            break
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                running = False
-        if not running:
-            break
-
-        h, w = frame.shape[:2]
-        canvas = np.zeros((h, w, 3), dtype=np.uint8)
-        canvas[:] = (10, 10, 20)
+            return Task.cont
 
         frame_time = time.time()
-        dt_motion = max(0.0, frame_time - motion_t_prev)
+        dt_motion = max(0.0, frame_time - self.motion_t_prev)
 
+        h, w = frame.shape[:2]
         focal = w
-        K = np.array([[focal, 0.0, w / 2.0],
-                      [0.0, focal, h / 2.0],
-                      [0.0, 0.0, 1.0]], dtype=np.float32)
+        K = np.array(
+            [[focal, 0.0, w / 2.0], [0.0, focal, h / 2.0], [0.0, 0.0, 1.0]],
+            dtype=np.float32,
+        )
         dist = np.zeros((4, 1), dtype=np.float32)
 
-        estimate = tracker.process(frame, frame_time, K, dist)
+        estimate = self.tracker.process(frame, frame_time, K, dist)
 
         if estimate.detected and estimate.position_mm is not None:
-            cam_pos_display = estimate.position_mm.astype(np.float32)
+            self.cam_pos_display = estimate.position_mm.astype(np.float32)
             pose_text = (
-                f"x={cam_pos_display[0]:+.1f}  "
-                f"y={cam_pos_display[1]:+.1f}  "
-                f"z={cam_pos_display[2]:+.1f}"
+                f"x={self.cam_pos_display[0]:+.1f}  "
+                f"y={self.cam_pos_display[1]:+.1f}  "
+                f"z={self.cam_pos_display[2]:+.1f}"
             )
         else:
             pose_text = "No face"
-            lerp = 1.0 - math.exp(-config.recenter_lerp_rate * dt_motion)
+            lerp = 1.0 - math.exp(-self.app_config.recenter_lerp_rate * dt_motion)
             lerp = float(min(max(lerp, 0.0), 1.0))
-            cam_pos_display = cam_pos_display + (default_cam_pos - cam_pos_display) * lerp
-            cam_pos_display = cam_pos_display.astype(np.float32)
+            self.cam_pos_display = self.cam_pos_display + (
+                self.default_cam_pos - self.cam_pos_display
+            ) * lerp
+            self.cam_pos_display = self.cam_pos_display.astype(np.float32)
 
-        cube_renderer.draw(canvas, cam_pos_display, K, dist)
-        motion_t_prev = frame_time
+        # Cube renderer retained for future 3D work; intentionally not invoked for now.
+
+        self.motion_t_prev = frame_time
 
         t_now = time.time()
-        fps = 1.0 / max(1e-6, (t_now - t_prev))
-        t_prev = t_now
-        fps_avg = fps if fps_avg is None else (fps_avg * 0.9 + fps * 0.1)
+        fps = 1.0 / max(1e-6, (t_now - self.t_prev))
+        self.t_prev = t_now
+        self.fps_avg = fps if self.fps_avg is None else (self.fps_avg * 0.9 + fps * 0.1)
 
-        cv2.putText(canvas, pose_text, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (240, 240, 240), 2, cv2.LINE_AA)
-        cv2.putText(canvas, f"FPS: {fps_avg:.1f}", (10, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 255), 2, cv2.LINE_AA)
+        self.pose_text.setText(pose_text)
+        self._apply_camera_pose(self.cam_pos_display)
 
-        display = cv2.resize(canvas, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
-        display_rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
-        surface_array = np.transpose(display_rgb, (1, 0, 2)).copy()
-        pygame.surfarray.blit_array(frame_surface, surface_array)
-        screen.fill((0, 0, 0))
-        offset_x = (win_w - disp_w) // 2
-        offset_y = (win_h - disp_h) // 2
-        screen.blit(frame_surface, (offset_x, offset_y))
-        pygame.display.flip()
+        self.fps_text.setText(f"FPS: {self.fps_avg:.1f}")
 
-    tracker.close()
-    cap.release()
-    pygame.quit()
+        return Task.cont
+
+    def _handle_exit(self) -> None:
+        self._cleanup()
+        self.userExit()
+
+    def _cleanup(self) -> None:
+        if getattr(self, "tracker", None) is not None:
+            self.tracker.close()
+            self.tracker = None
+        if getattr(self, "cap", None) is not None:
+            self.cap.release()
+            self.cap = None
+
+    def destroy(self) -> None:
+        self._cleanup()
+        super().destroy()
+
+
+# ---------- Main ----------
+def main():
+    loadPrcFileData("", "win-size 800 600")
+    loadPrcFileData("", "undecorated 1")
+
+    app = HoloFrameApp()
+    app.run()
 
 if __name__ == "__main__":
     main()
