@@ -21,11 +21,13 @@ from panda3d.core import (
     GeomVertexWriter,
     PerspectiveLens,
     Spotlight,
+    PointLight,
     VirtualFileSystem,
     getModelPath,
     TextNode,
     Vec3,
     Vec4,
+    LVector3,
     WindowProperties,
     loadPrcFileData,
 )
@@ -39,6 +41,8 @@ class HoloFrameApp(ShowBase):
     """Main Panda3D application that renders the tracked model inside a room."""
     def __init__(self) -> None:
         ShowBase.__init__(self)
+
+        self.render.setShaderAuto()
 
         self.disableMouse()
         self.setBackgroundColor(0, 0, 0)
@@ -155,42 +159,63 @@ class HoloFrameApp(ShowBase):
         center = (min_bound + max_bound) * 0.5
         size = max_bound - min_bound
         model.setPos(-center)
+        model_root.setH(-25)
 
         max_dim = max(size.x, size.y, size.z, 1e-6)
         scale_factor = target_size_m / max_dim
         model_root.setScale(scale_factor)
 
-        depth_half = (size.y * 0.5) * scale_factor
-        model_root.setPos(0.0, -depth_half, 0.0)
+        depth_half = size.y * 0.5 * scale_factor
+        model_root.setPos(0.0, depth_half + 0.05, 0.0)
 
         if self.app_config.model_path == "models/box":
             model_root.setColor(0.25, 0.6, 0.95, 1.0)
 
         model_root.setShaderAuto()
 
+        # --- Lighting setup ---
+        # Tiny ambient to lift darkest areas without washing out shadows
         ambient = AmbientLight("ambient")
-        ambient.setColor(Vec4(0.24, 0.24, 0.30, 1.0) * 0.5)
+        ambient.setColor(Vec4(0.06, 0.06, 0.06, 1.0) * 0.1)
         ambient_node = scene_root.attachNewNode(ambient)
 
-        key = DirectionalLight("key")
-        key.setColor(Vec4(0.9, 0.9, 0.9, 1.0) * 0.75)
-        key.setDirection(Vec3(0.0, 1.0, -0.2))
-        key_node = scene_root.attachNewNode(key)
-
-        self.render.clearLight()
-        self.render.setLight(ambient_node)
-        self.render.setLight(key_node)
-
+        # Key light: ceiling spotlight (only shadow-casting light)
         spot_light = Spotlight("ceiling-spot")
-        spot_light.setColor(Vec4(1.0, 0.95, 0.85, 1.0) * 2.5)
+        spot_light.setColor(Vec4(1.0, 0.98, 0.92, 1.0) * 1.4)
         spot_lens = PerspectiveLens()
         spot_lens.setFov(60.0)
-        spot_lens.setNearFar(0.01, 50.0)  # Allow the spotlight to illuminate close geometry.
+        spot_lens.setNearFar(0.02, 5.0)
         spot_light.setLens(spot_lens)
+        spot_light.setShadowCaster(True, 1024, 1024)
         self._spotlight_node = scene_root.attachNewNode(spot_light)
+
+        # Wall bounce fills (no shadows): slight tints to mimic color bleed
+        left_fill = DirectionalLight("left_bounce")
+        left_fill.setColor((0.10, 0.15, 0.10, 1))   # green-ish if left wall is green
+        left_node = scene_root.attachNewNode(left_fill)
+        left_node.setHpr(90, -10, 0)
+
+        right_fill = DirectionalLight("right_bounce")
+        right_fill.setColor((0.15, 0.10, 0.10, 1))  # red-ish if right wall is red
+        right_node = scene_root.attachNewNode(right_fill)
+        right_node.setHpr(-90, -10, 0)
+
+        # Floor bounce: gentle upward fill (no shadows)
+        up_fill = DirectionalLight("floor_hemi")
+        up_fill.setColor((0.12, 0.12, 0.12, 1))
+        up_node = scene_root.attachNewNode(up_fill)
+        up_node.setHpr(0, 60, 0)  # tilt upward to light undersides
+
+        # Apply lights (spot is positioned later in _update_room_lighting)
+        self.render.clearLight()
+        self.render.setLight(ambient_node)
         self.render.setLight(self._spotlight_node)
+        self.render.setLight(left_node)
+        self.render.setLight(right_node)
+        self.render.setLight(up_node)
 
         self._room_node = scene_root.attachNewNode("cornell-room")
+        self._room_node.setTwoSided(True)
         self._rebuild_room_geometry()
         self._update_room_lighting()
 
@@ -341,8 +366,9 @@ class HoloFrameApp(ShowBase):
         height = max(self._room_min_height, float(self.room_height))
         depth = max(self._room_min_depth, float(self.room_depth))
 
-        self._spotlight_node.setPos(0.0, depth * -0.5, height * 0.5)
-        self._spotlight_node.lookAt(0.0, depth * 0.5, height * -0.5)
+        # Centered under the ceiling, aimed toward the room center
+        self._spotlight_node.setPos(0.0, -depth * 0.5, height * 0.5)
+        self._spotlight_node.lookAt(0.0, depth * 0.5, 0.0)
 
     def _log_available_models(self) -> None:
         vfs = VirtualFileSystem.getGlobalPtr()
@@ -472,6 +498,8 @@ class HoloFrameApp(ShowBase):
 
 # ---------- Main ----------
 def main():
+    loadPrcFileData("", "load-display pandagl")
+    loadPrcFileData("", "framebuffer-srgb true")
     loadPrcFileData("", "win-size 800 600")
     loadPrcFileData("", "undecorated 1")
 
