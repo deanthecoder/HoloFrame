@@ -16,6 +16,7 @@ An experimental [Panda3D](https://www.panda3d.org/) showcase that turns your mon
 - `?` (or `Shift-/`) — Toggle on-screen control help.
 - Arrow keys — Adjust room width/height.
 - `l` / `p` — Pull/push the back wall to tweak room depth.
+- `m` — Cycle the active model.
 
 ## Screenshot
 ![HoloFrame in action](img/screen.png)

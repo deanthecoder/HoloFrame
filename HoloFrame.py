@@ -71,6 +71,7 @@ class HoloFrameApp(ShowBase):
         self.app_config = AppConfig()
 
         target_size_m = max(1e-3, self.app_config.model_max_size_mm / 1000.0)
+        self._model_target_size_m = target_size_m
         self.room_width = target_size_m * 2.0
         self.room_height = target_size_m * 2.0
         self.room_depth = target_size_m * 3.0
@@ -136,6 +137,7 @@ class HoloFrameApp(ShowBase):
             "  ESC : Quit\n"
             "  f   : Toggle fullscreen\n"
             "  h   : Toggle HUD\n"
+            "  m   : Next model\n"
             "  ?   : Toggle this help\n"
             "  Arrows : Resize room (W/H)\n"
             "  l / p : Adjust room depth"
@@ -150,6 +152,21 @@ class HoloFrameApp(ShowBase):
         )
         self.instructions_text.hide()
 
+        self._model_cycle = [
+            "models/teapot",
+            "models/panda",
+            "models/smiley",
+            "models/environment",
+        ]
+        if self.app_config.model_path in self._model_cycle:
+            self._model_index = self._model_cycle.index(self.app_config.model_path)
+        else:
+            self._model_cycle.insert(0, self.app_config.model_path)
+            self._model_index = 0
+        self._current_model_path = self._model_cycle[self._model_index]
+
+        self.accept("m", self._cycle_model)
+
         self._log_available_models()
         self._build_scene()
         self._apply_camera_pose(self.cam_pos_display)
@@ -163,39 +180,13 @@ class HoloFrameApp(ShowBase):
 
     def _build_scene(self) -> None:
         """Load the primary model and construct lighting and room geometry."""
-        target_size_m = max(1e-3, self.app_config.model_max_size_mm / 1000.0)
-
         scene_root = self.render.attachNewNode("holoframe-scene")
         model_root = scene_root.attachNewNode("cube-root")
 
-        model = self.loader.loadModel(self.app_config.model_path)
-        if model.isEmpty():
-            raise RuntimeError(
-                f"Failed to load model '{self.app_config.model_path}'. Update config.model_path to a valid Panda3D model."
-            )
+        self._scene_root = scene_root
+        self._cube_node = model_root
 
-        model.reparentTo(model_root)
-
-        min_bound, max_bound = model.getTightBounds()
-        if min_bound is None or max_bound is None:
-            raise RuntimeError(f"Failed to compute bounds for model '{self.app_config.model_path}'")
-
-        center = (min_bound + max_bound) * 0.5
-        size = max_bound - min_bound
-        model.setPos(-center)
-        model_root.setH(-25)
-
-        max_dim = max(size.x, size.y, size.z, 1e-6)
-        scale_factor = target_size_m / max_dim
-        model_root.setScale(scale_factor)
-
-        depth_half = size.y * 0.5 * scale_factor
-        model_root.setPos(0.0, depth_half + 0.05, 0.0)
-
-        if self.app_config.model_path == "models/box":
-            model_root.setColor(0.25, 0.6, 0.95, 1.0)
-
-        model_root.setShaderAuto()
+        self._apply_model(self._current_model_path)
 
         # --- Lighting setup ---
         # Tiny ambient to lift darkest areas without washing out shadows
@@ -243,8 +234,60 @@ class HoloFrameApp(ShowBase):
         self._rebuild_room_geometry()
         self._update_room_lighting()
 
-        self._scene_root = scene_root
-        self._cube_node = model_root
+    def _apply_model(self, model_path: str) -> None:
+        """Load a model, normalize its scale, and mount it under the cube root."""
+        if getattr(self, "_cube_node", None) is None:
+            raise RuntimeError("Model root is not initialized")
+
+        for child in self._cube_node.getChildren():
+            child.removeNode()
+
+        model = self.loader.loadModel(model_path)
+        if model.isEmpty():
+            raise RuntimeError(f"Failed to load model '{model_path}'")
+        model.reparentTo(self._cube_node)
+
+        min_bound, max_bound = model.getTightBounds()
+        if min_bound is None or max_bound is None:
+            raise RuntimeError(f"Failed to compute bounds for model '{model_path}'")
+
+        center = (min_bound + max_bound) * 0.5
+        size = max_bound - min_bound
+        model.setPos(-center)
+        self._cube_node.setH(-25)
+
+        target_size_m = getattr(self, "_model_target_size_m", None)
+        if target_size_m is None:
+            raise RuntimeError("Model target size is not initialized")
+
+        max_dim = max(size.x, size.y, size.z, 1e-6)
+        scale_factor = target_size_m / max_dim
+        self._cube_node.setScale(scale_factor)
+
+        depth_half = size.y * 0.5 * scale_factor
+        self._cube_node.setPos(0.0, depth_half + 0.05, 0.0)
+
+        self._cube_node.clearColor()
+        if model_path == "models/box":
+            self._cube_node.setColor(0.25, 0.6, 0.95, 1.0)
+
+        self._cube_node.setShaderAuto()
+        self._current_model_path = model_path
+
+        if model_path in self._model_cycle:
+            self._model_index = self._model_cycle.index(model_path)
+
+        print(f"[HoloFrame] Active model: {model_path}")
+
+    def _cycle_model(self) -> None:
+        """Advance to the next model in the rotation and reload it."""
+        if not getattr(self, "_model_cycle", None):
+            raise RuntimeError("Model cycle is not defined")
+
+        next_index = (self._model_index + 1) % len(self._model_cycle)
+        next_path = self._model_cycle[next_index]
+        self._model_index = next_index
+        self._apply_model(next_path)
 
     def _make_panel(self, name: str, corners, normal) -> GeomNode:
         """Create a rectangular panel geometry from four corner points and a normal."""
