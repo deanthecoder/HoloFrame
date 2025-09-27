@@ -105,6 +105,7 @@ class HoloFrameApp(ShowBase):
         self.motion_t_prev = self.t_prev
         self._hud_visible = True
         self._instructions_visible = False
+        self._fullscreen = True
 
         self.pose_text = OnscreenText(
             text="Initializing pose",
@@ -133,6 +134,7 @@ class HoloFrameApp(ShowBase):
         instructions_lines = (
             "Controls:\n"
             "  ESC : Quit\n"
+            "  f   : Toggle fullscreen\n"
             "  h   : Toggle HUD\n"
             "  ?   : Toggle this help\n"
             "  Arrows : Resize room (W/H)\n"
@@ -155,6 +157,7 @@ class HoloFrameApp(ShowBase):
         self.accept("?", self._toggle_instructions)
         self.accept("shift-/", self._toggle_instructions)
         self.accept("h", self._toggle_hud_visibility)
+        self.accept("f", self._toggle_fullscreen)
 
         self.taskMgr.add(self._update_task, "holoframe-update")
 
@@ -323,8 +326,8 @@ class HoloFrameApp(ShowBase):
         )
         ceiling.setColor(0.8, 0.8, 0.8, 1.0)
 
-        light_half_w = width * 0.15
-        light_half_d = depth * 0.15
+        light_half_w = width * 0.1
+        light_half_d = depth * 0.1
         light_center_y = depth * 0.5
         light_z = half_h - 0.01
         light_back = light_center_y + light_half_d
@@ -470,6 +473,29 @@ class HoloFrameApp(ShowBase):
         """Show or hide the HUD overlays with a single toggle."""
         self._hud_visible = not self._hud_visible
         self._apply_hud_visibility()
+
+    def _toggle_fullscreen(self) -> None:
+        """Switch the Panda3D window between fullscreen and windowed modes."""
+        self._fullscreen = not self._fullscreen
+
+        props = WindowProperties()
+        if self._fullscreen:
+            display_w = self.pipe.getDisplayWidth() if self.pipe else 0
+            display_h = self.pipe.getDisplayHeight() if self.pipe else 0
+            if display_w <= 0 or display_h <= 0:
+                # If we fail to query the display, keep the previous mode.
+                self._fullscreen = False
+                return
+            props.setSize(display_w, display_h)
+            props.setFullscreen(True)
+            props.setUndecorated(True)
+        else:
+            props.setFullscreen(False)
+            props.setUndecorated(False)
+            props.setSize(1280, 720)
+
+        if self.win is not None:
+            self.win.requestProperties(props)
 
     def _apply_hud_visibility(self) -> None:
         """Update HUD widget visibility to match toggle state."""
