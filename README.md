@@ -33,3 +33,10 @@ An experimental [Panda3D](https://www.panda3d.org/) showcase that turns your mon
    ```
 
 Make sure your webcam is accessible; the app will exit if a camera stream cannot be opened.
+
+## How It Works
+1. Read frames from the default webcam using OpenCV.
+2. Run face tracking to estimate the user's head position in each frame.
+3. Convert the detected head pose into the Panda3D coordinate space.
+4. Update the virtual camera transform so the scene matches the user's viewpoint.
+5. Render the Cornell box scene and selected model with the new perspective.
