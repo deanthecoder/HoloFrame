@@ -25,9 +25,7 @@ from panda3d.core import (
     VirtualFileSystem,
     getModelPath,
     TextNode,
-    Vec3,
     Vec4,
-    LVector3,
     WindowProperties,
     loadPrcFileData,
 )
@@ -105,6 +103,8 @@ class HoloFrameApp(ShowBase):
         self.fps_avg = None
         self.t_prev = time.time()
         self.motion_t_prev = self.t_prev
+        self._hud_visible = True
+        self._instructions_visible = False
 
         self.pose_text = OnscreenText(
             text="Initializing pose",
@@ -116,7 +116,7 @@ class HoloFrameApp(ShowBase):
         )
         self.fps_text = OnscreenText(
             text="FPS: --",
-            pos=(-1.3, 0.85),
+            pos=(-1.3, 0.885),
             align=TextNode.ALeft,
             fg=(0.8, 0.8, 1.0, 1.0),
             scale=0.025,
@@ -124,16 +124,37 @@ class HoloFrameApp(ShowBase):
         )
         self.room_text = OnscreenText(
             text="Room: --",
-            pos=(-1.3, 0.77),
+            pos=(-1.3, 0.84),
             align=TextNode.ALeft,
             fg=(0.9, 0.9, 0.9, 1.0),
             scale=0.025,
             mayChange=True,
         )
+        instructions_lines = (
+            "Controls:\n"
+            "  ESC : Quit\n"
+            "  h   : Toggle HUD\n"
+            "  ?   : Toggle this help\n"
+            "  Arrows : Resize room (W/H)\n"
+            "  l / p : Adjust room depth"
+        )
+        self.instructions_text = OnscreenText(
+            text=instructions_lines,
+            pos=(0.0, 0.82),
+            align=TextNode.ACenter,
+            fg=(0.95, 0.95, 0.9, 1.0),
+            scale=0.035,
+            mayChange=True,
+        )
+        self.instructions_text.hide()
 
         self._log_available_models()
         self._build_scene()
         self._apply_camera_pose(self.cam_pos_display)
+
+        self.accept("?", self._toggle_instructions)
+        self.accept("shift-/", self._toggle_instructions)
+        self.accept("h", self._toggle_hud_visibility)
 
         self.taskMgr.add(self._update_task, "holoframe-update")
 
@@ -302,6 +323,23 @@ class HoloFrameApp(ShowBase):
         )
         ceiling.setColor(0.8, 0.8, 0.8, 1.0)
 
+        light_half_w = width * 0.15
+        light_half_d = depth * 0.15
+        light_center_y = depth * 0.5
+        light_z = half_h - 0.01
+        light_back = light_center_y + light_half_d
+        light_front = light_center_y - light_half_d
+        ceiling_light_corners = [
+            (-light_half_w, light_back, light_z),
+            (light_half_w, light_back, light_z),
+            (light_half_w, light_front, light_z),
+            (-light_half_w, light_front, light_z),
+        ]
+        ceiling_light = self._room_node.attachNewNode(
+            self._make_panel("room-ceiling-light", ceiling_light_corners, (0.0, 0.0, -1.0))
+        )
+        ceiling_light.setColor(10.0, 10.0, 10.0, 1.0)
+
         left_wall = self._room_node.attachNewNode(
             self._make_panel("room-left", left_wall_corners, (1.0, 0.0, 0.0))
         )
@@ -411,6 +449,7 @@ class HoloFrameApp(ShowBase):
             print(f"  - {name}")
 
     def _apply_camera_pose(self, cam_pos_mm: np.ndarray) -> None:
+        """Place the Panda3D camera based on the smoothed head translation."""
         pos = cam_pos_mm.astype(np.float32)
         x_m = -float(pos[0]) * 0.001
         y_m = -float(pos[2]) * 0.001
@@ -421,6 +460,32 @@ class HoloFrameApp(ShowBase):
 
         self.camera.setPos(x_m, y_m, z_m)
         self.camera.lookAt(0.0, 0.0, 0.0)
+
+    def _toggle_instructions(self) -> None:
+        """Show or hide the on-screen controls cheat sheet."""
+        self._instructions_visible = not self._instructions_visible
+        self._apply_hud_visibility()
+
+    def _toggle_hud_visibility(self) -> None:
+        """Show or hide the HUD overlays with a single toggle."""
+        self._hud_visible = not self._hud_visible
+        self._apply_hud_visibility()
+
+    def _apply_hud_visibility(self) -> None:
+        """Update HUD widget visibility to match toggle state."""
+        if self._hud_visible:
+            self.pose_text.show()
+            self.fps_text.show()
+            self.room_text.show()
+            if self._instructions_visible:
+                self.instructions_text.show()
+            else:
+                self.instructions_text.hide()
+        else:
+            self.pose_text.hide()
+            self.fps_text.hide()
+            self.room_text.hide()
+            self.instructions_text.hide()
 
     def _update_task(self, task: Task) -> int:
         ok, frame = self.cap.read()
