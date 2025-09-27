@@ -1,3 +1,4 @@
+# HoloFrame Panda3D experiment – see https://github.com/deanthecoder/HoloFrame for details.
 # Setup:
 #   python -m pip install --upgrade pip
 #   pip install opencv-python mediapipe numpy panda3d
@@ -505,7 +506,11 @@ class HoloFrameApp(ShowBase):
             y_m = -0.05
 
         self.camera.setPos(x_m, y_m, z_m)
-        self.camera.lookAt(0.0, 0.0, 0.0)
+
+        if getattr(self, "_cube_node", None) is None:
+            raise RuntimeError("Model root is not initialized")
+
+        self.camera.lookAt(self._cube_node)
 
     def _toggle_instructions(self) -> None:
         """Show or hide the on-screen controls cheat sheet."""
