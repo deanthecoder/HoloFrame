@@ -22,7 +22,6 @@ from panda3d.core import (
     GeomVertexWriter,
     PerspectiveLens,
     Spotlight,
-    PointLight,
     VirtualFileSystem,
     getModelPath,
     TextNode,
@@ -33,7 +32,6 @@ from panda3d.core import (
 
 from config import AppConfig
 from head_pose_tracker import HeadPoseTracker
-from rendering import CubeRenderer
 
 
 class HoloFrameApp(ShowBase):
@@ -98,7 +96,6 @@ class HoloFrameApp(ShowBase):
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
 
         self.tracker = HeadPoseTracker(self.app_config)
-        self.cube_renderer = CubeRenderer(self.app_config)
 
         self.default_cam_pos = np.array(self.app_config.default_camera_pos_mm, dtype=np.float32)
         self.cam_pos_display = self.default_cam_pos.copy()
