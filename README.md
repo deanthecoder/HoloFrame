@@ -40,3 +40,7 @@ Make sure your webcam is accessible; the app will exit if a camera stream cannot
 3. Convert the detected head pose into the Panda3D coordinate space.
 4. Update the virtual camera transform so the scene matches the user's viewpoint.
 5. Render the Cornell box scene and selected model with the new perspective.
+
+## License
+
+Licensed under the MIT License. See [LICENSE](LICENSE) for details.
