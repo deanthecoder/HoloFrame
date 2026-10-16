@@ -75,7 +75,7 @@ class DisplayTests(unittest.TestCase):
 class TrackingTests(unittest.TestCase):
     def test_camera_failure_recenters_and_updates_status(self):
         app = SimpleNamespace(
-            cap=Mock(), tracker=Mock(), app_config=AppConfig(),
+            cap=Mock(), tracker=Mock(), webcam_environment=Mock(), app_config=AppConfig(),
             motion_t_prev=10.0, t_prev=10.0, fps_avg=None,
             cam_pos_display=np.array([100., 50., 400.], dtype=np.float32),
             default_cam_pos=np.array([0., 0., 600.], dtype=np.float32),

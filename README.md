@@ -50,6 +50,7 @@ independently. Only OpenCV's contrib distribution is needed; avoid installing
 - `H`: Toggle the HUD.
 - `?`: Toggle controls help.
 - `M`: Cycle the foreground model.
+- `V`: Toggle webcam-driven lighting and soft reflections for comparison.
 - `Left / Right`: Shrink or expand the virtual room width.
 - `Down / Up`: Shrink or expand the virtual room height.
 - `L / P`: Shrink or expand the virtual room depth.
@@ -79,6 +80,9 @@ the projection/calibration. Depth adjustments last for the current session.
 - `default_camera_pos_mm`: Resting eye position `(right, up, distance)` relative to
   screen center, in millimeters; defaults to `(0, 0, 600)`.
 - `smoothing_*`: Parameters for the One Euro filters applied to head pose data.
+- `webcam_light_strength`: Strength of each of the four broad webcam-derived fill lights (default 0.12).
+- `webcam_reflection_strength`: Additive reflection strength on the foreground model (default 0.18).
+- `webcam_smoothing_seconds`: Response time for lighting/reflection changes (default 0.8 seconds).
 
 Adjust these values before launching the app to match your environment.
 
@@ -112,6 +116,18 @@ monoscopic effect, not separate stereo images for each eye.
 ## Checks
 Run `.venv\Scripts\python -m unittest -v test_holoframe` for projection invariants,
 display selection, synthetic pose recovery, and failed-frame fallback checks.
+
+## Webcam lighting and reflections
+The existing camera frames are downsampled and blurred, converted to approximate linear
+RGB, and sampled in four broad regions to drive gentle directional fill lights. A small
+world-aligned cube map adds blurred reflections to the foreground model. The webcam's
+limited view occupies only the viewer-facing directions; unseen directions use a dim,
+neutral fill. This is an artistic approximation, not HDR light measurement or a 3D scan.
+Updates run at most 10 times per second and are smoothed to reduce exposure flicker.
+Failed camera reads fade the contribution away. `V` immediately disables both effects.
+Webcam images stay in memory and are neither saved nor uploaded.
+
+Run `.venv\Scripts\python -m unittest -v` to include the webcam environment checks.
 
 ## Screenshot
 ![Earlier HoloFrame scene](img/screen.png)

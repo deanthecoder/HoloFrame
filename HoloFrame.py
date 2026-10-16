@@ -38,6 +38,7 @@ from panda3d.core import (
 )
 
 from projection import apply_screen_projection
+from webcam_environment import WebcamEnvironment
 
 
 class HoloFrameApp(ShowBase):
@@ -164,7 +165,8 @@ class HoloFrameApp(ShowBase):
         self.instructions_text = OnscreenText(
             text="ESC: quit   F: fullscreen   H: HUD   M: next model\n"
                  "Arrows: room size   L/P: room depth\n"
-                 "W/S: model depth   C: screen plane   R: reset   ?: help",
+                 "W/S: model depth   C: screen plane   R: reset   ?: help\n"
+                 "V: webcam lighting/reflections",
             pos=(0, 0.75), scale=0.035, align=TextNode.ACenter,
             fg=(0.95, 0.95, 0.9, 1), mayChange=True)
         self.instructions_text.hide()
@@ -178,6 +180,8 @@ class HoloFrameApp(ShowBase):
         self.accept("shift-/", self._toggle_instructions)
         self.accept("f", self._toggle_fullscreen)
         self._build_scene()
+        self.webcam_environment = WebcamEnvironment(self._scene_root, self._cube_node, self.app_config)
+        self.accept("v", self._toggle_webcam_environment)
         self._initial_model_depth_m = self._cube_node.getY()
         self._reset_model_depth()
         self._apply_camera_pose(self.cam_pos_display)
@@ -275,6 +279,10 @@ class HoloFrameApp(ShowBase):
         """Advance through the bundled models."""
         self._model_index = (self._model_index + 1) % len(self._model_cycle)
         self._apply_model(self._model_cycle[self._model_index])
+
+    def _toggle_webcam_environment(self) -> None:
+        """Compare webcam-driven lighting/reflections with the original scene."""
+        self.webcam_environment.set_enabled(not self.webcam_environment.enabled)
 
     def _toggle_fullscreen(self) -> None:
         """Toggle a windowed preview and the originally selected full-monitor view."""
@@ -538,6 +546,7 @@ class HoloFrameApp(ShowBase):
     def _update_task(self, task: Task) -> int:
         ok, frame = self.cap.read()
         frame_time = time.perf_counter()
+        self.webcam_environment.update(frame if ok else None, frame_time)
         dt_motion = max(0.0, frame_time - self.motion_t_prev)
         estimate = HeadPoseEstimate(False, None)
         if ok and frame is not None:
@@ -578,7 +587,8 @@ class HoloFrameApp(ShowBase):
         self.pose_text.setText(pose_text)
         self._apply_camera_pose(self.cam_pos_display)
 
-        self.fps_text.setText(f"FPS: {self.fps_avg:.1f}")
+        webcam_status = "on" if self.webcam_environment.enabled else "off"
+        self.fps_text.setText(f"FPS: {self.fps_avg:.1f}   Webcam light/reflections: {webcam_status} (V)")
 
         width = max(self._room_min_width, float(self.room_width))
         height = max(self._room_min_height, float(self.room_height))

@@ -20,6 +20,9 @@ class AppConfig:
     smoothing_min_cutoff: float = 0.1
     smoothing_beta: float = 0.01
     smoothing_dcutoff: float = 1.0
+    webcam_light_strength: float = 0.12
+    webcam_reflection_strength: float = 0.18
+    webcam_smoothing_seconds: float = 0.8
 
     @property
     def cube_distance_mm(self) -> float:
