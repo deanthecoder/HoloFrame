@@ -1,18 +1,23 @@
-# HoloFrame Panda3D experiment – see https://github.com/deanthecoder/HoloFrame for details.
 # Setup:
 #   python -m pip install --upgrade pip
-#   pip install opencv-python mediapipe numpy panda3d
+#   python -m pip install -r requirements.txt
 
 import cv2
 import numpy as np
 import time
 import math
 
+# MediaPipe must load before Panda3D to avoid a native DLL conflict on Windows.
+from config import AppConfig
+from head_pose_tracker import HeadPoseEstimate, HeadPoseTracker
+from display_selection import active_displays, select_display
+
 from direct.showbase.ShowBase import ShowBase
 from direct.gui.OnscreenText import OnscreenText
 from direct.task import Task
 from panda3d.core import (
     AmbientLight,
+    BitMask32,
     DirectionalLight,
     Geom,
     GeomNode,
@@ -20,26 +25,57 @@ from panda3d.core import (
     GeomVertexData,
     GeomVertexFormat,
     GeomVertexWriter,
+    LineSegs,
+    Material,
     PerspectiveLens,
     Spotlight,
-    VirtualFileSystem,
-    getModelPath,
     TextNode,
+    TransparencyAttrib,
+    Vec3,
     Vec4,
     WindowProperties,
     loadPrcFileData,
 )
 
-from config import AppConfig
-from head_pose_tracker import HeadPoseTracker
+from projection import apply_screen_projection
 
 
 class HoloFrameApp(ShowBase):
     """Main Panda3D application that renders the tracked model inside a room."""
     def __init__(self) -> None:
-        ShowBase.__init__(self)
+        self.app_config = AppConfig()
+        self._hud_visible = True
+        self._instructions_visible = False
+        self._fullscreen = True
+        displays = active_displays()
+        display = select_display(displays, self.app_config.monitor_index)
+        for i, candidate in enumerate(displays):
+            print(f"[HoloFrame] Display {i}: {candidate}")
+        ShowBase.__init__(self, windowType="none")
 
-        self.render.setShaderAuto()
+        props = WindowProperties()
+        props.setTitle("HoloFrame (ESC to quit)")
+        props.setUndecorated(True)
+        if display is not None:
+            # Borderless desktop pixels select the actual monitor, including negative origins.
+            props.setOrigin(display.x, display.y)
+            props.setSize(display.width, display.height)
+            props.setFullscreen(False)
+            print(f"[HoloFrame] Selected display: {display}")
+        else:
+            self.makeDefaultPipe()
+            width = self.pipe.getDisplayWidth() if self.pipe else 0
+            height = self.pipe.getDisplayHeight() if self.pipe else 0
+            if width <= 0 or height <= 0:
+                raise RuntimeError("Display size is not available from the graphics pipe")
+            props.setSize(width, height)
+            props.setFullscreen(True)
+        self._fullscreen_properties = WindowProperties(props)
+        self.openDefaultWindow(props=props)
+        if self.win is None:
+            raise RuntimeError("Unable to open the HoloFrame window")
+        self.screen_height_mm = (self.app_config.screen_width_mm *
+                                 self.win.getYSize() / self.win.getXSize())
 
         self.disableMouse()
         self.setBackgroundColor(0, 0, 0)
@@ -52,32 +88,14 @@ class HoloFrameApp(ShowBase):
             self.win.setCloseRequestEvent("holoframe-close")
             self.accept("holoframe-close", self._handle_exit)
 
-        props = WindowProperties()
-        props.setTitle("HoloFrame (ESC to quit)")
-        props.setUndecorated(True)
-
-        display_w = self.pipe.getDisplayWidth() if self.pipe else 0
-        display_h = self.pipe.getDisplayHeight() if self.pipe else 0
-        if display_w > 0 and display_h > 0:
-            props.setSize(display_w, display_h)
-            props.setFullscreen(True)
-        else:
-            raise RuntimeError("Display size is not available from the graphics pipe")
-
-        if self.win is not None:
-            self.win.requestProperties(props)
-
-        self.app_config = AppConfig()
-
         target_size_m = max(1e-3, self.app_config.model_max_size_mm / 1000.0)
-        self._model_target_size_m = target_size_m
-        self.room_width = target_size_m * 2.0
-        self.room_height = target_size_m * 2.0
+        self.room_width = self.app_config.screen_width_mm / 1000.0
+        self.room_height = self.screen_height_mm / 1000.0
         self.room_depth = target_size_m * 3.0
         self._room_dimension_step = 0.1
         self._room_depth_step = 0.1
-        self._room_min_width = 0.3
-        self._room_min_height = 0.3
+        self._room_min_width = 0.1
+        self._room_min_height = 0.1
         self._room_min_depth = 0.3
         self._spotlight_node = None
 
@@ -87,28 +105,32 @@ class HoloFrameApp(ShowBase):
         self.accept("arrow_up", self._increase_room_height)
         self.accept("l", self._decrease_room_depth)
         self.accept("p", self._increase_room_depth)
+        for event in ("w", "w-repeat"):
+            self.accept(event, self._move_model_depth, [-0.01])
+        for event in ("s", "s-repeat"):
+            self.accept(event, self._move_model_depth, [0.01])
+        self.accept("c", self._set_model_depth, [0.0])
+        self.accept("r", self._reset_model_depth)
 
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(self.app_config.webcam_index)
         if not self.cap.isOpened():
             raise RuntimeError("Webcam not found")
 
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
 
-        self.tracker = HeadPoseTracker(self.app_config)
+        self.tracker = HeadPoseTracker(self.app_config, self.screen_height_mm)
 
         self.default_cam_pos = np.array(self.app_config.default_camera_pos_mm, dtype=np.float32)
         self.cam_pos_display = self.default_cam_pos.copy()
         self.fps_avg = None
-        self.t_prev = time.time()
+        self.t_prev = time.perf_counter()
         self.motion_t_prev = self.t_prev
-        self._hud_visible = True
-        self._instructions_visible = False
-        self._fullscreen = True
 
         self.pose_text = OnscreenText(
             text="Initializing pose",
-            pos=(-1.3, 0.93),
+            parent=self.a2dTopLeft,
+            pos=(0.04, -0.07),
             align=TextNode.ALeft,
             fg=(0.95, 0.95, 0.95, 1.0),
             scale=0.025,
@@ -116,7 +138,8 @@ class HoloFrameApp(ShowBase):
         )
         self.fps_text = OnscreenText(
             text="FPS: --",
-            pos=(-1.3, 0.885),
+            parent=self.a2dTopLeft,
+            pos=(0.04, -0.15),
             align=TextNode.ALeft,
             fg=(0.8, 0.8, 1.0, 1.0),
             scale=0.025,
@@ -124,126 +147,112 @@ class HoloFrameApp(ShowBase):
         )
         self.room_text = OnscreenText(
             text="Room: --",
-            pos=(-1.3, 0.84),
+            parent=self.a2dTopLeft,
+            pos=(0.04, -0.23),
             align=TextNode.ALeft,
             fg=(0.9, 0.9, 0.9, 1.0),
             scale=0.025,
             mayChange=True,
         )
-        instructions_lines = (
-            "Controls:\n"
-            "  ESC : Quit\n"
-            "  f   : Toggle fullscreen\n"
-            "  h   : Toggle HUD\n"
-            "  m   : Next model\n"
-            "  ?   : Toggle this help\n"
-            "  Arrows : Resize room (W/H)\n"
-            "  l / p : Adjust room depth"
+
+        self.model_depth_text = OnscreenText(
+            text="", parent=self.a2dTopLeft, pos=(0.04, -0.31),
+            align=TextNode.ALeft, fg=(0.95, 0.95, 0.95, 1.0),
+            scale=0.025, mayChange=True,
         )
+
         self.instructions_text = OnscreenText(
-            text=instructions_lines,
-            pos=(0.0, 0.82),
-            align=TextNode.ACenter,
-            fg=(0.95, 0.95, 0.9, 1.0),
-            scale=0.035,
-            mayChange=True,
-        )
+            text="ESC: quit   F: fullscreen   H: HUD   M: next model\n"
+                 "Arrows: room size   L/P: room depth\n"
+                 "W/S: model depth   C: screen plane   R: reset   ?: help",
+            pos=(0, 0.75), scale=0.035, align=TextNode.ACenter,
+            fg=(0.95, 0.95, 0.9, 1), mayChange=True)
         self.instructions_text.hide()
-
-        self._model_cycle = [
-            "models/teapot",
-            "models/panda",
-            "models/smiley",
-            "models/environment",
-        ]
-        if self.app_config.model_path in self._model_cycle:
-            self._model_index = self._model_cycle.index(self.app_config.model_path)
-        else:
-            self._model_cycle.insert(0, self.app_config.model_path)
-            self._model_index = 0
-        self._current_model_path = self._model_cycle[self._model_index]
-
+        self._model_cycle = list(dict.fromkeys([
+            self.app_config.model_path, "models/teapot", "models/panda",
+            "models/smiley", "models/environment"]))
+        self._model_index = 0
         self.accept("m", self._cycle_model)
-
-        self._log_available_models()
-        self._build_scene()
-        self._apply_camera_pose(self.cam_pos_display)
-
+        self.accept("h", self._toggle_hud_visibility)
         self.accept("?", self._toggle_instructions)
         self.accept("shift-/", self._toggle_instructions)
-        self.accept("h", self._toggle_hud_visibility)
         self.accept("f", self._toggle_fullscreen)
+        self._build_scene()
+        self._initial_model_depth_m = self._cube_node.getY()
+        self._reset_model_depth()
+        self._apply_camera_pose(self.cam_pos_display)
 
         self.taskMgr.add(self._update_task, "holoframe-update")
 
     def _build_scene(self) -> None:
         """Load the primary model and construct lighting and room geometry."""
+        target_size_m = max(1e-3, self.app_config.model_max_size_mm / 1000.0)
+
         scene_root = self.render.attachNewNode("holoframe-scene")
+        scene_root.setShaderAuto()
         model_root = scene_root.attachNewNode("cube-root")
+
+        self._cube_node = model_root
+        self._apply_model(self._model_cycle[self._model_index])
+        model_root.setY(self.app_config.model_depth_mm * 0.001)
+
+        ceramic = Material("glazed-ceramic")
+        ceramic.setDiffuse(Vec4(0.72, 0.77, 0.80, 1.0))
+        ceramic.setAmbient(Vec4(0.72, 0.77, 0.80, 1.0))
+        ceramic.setSpecular(Vec4(0.28, 0.28, 0.28, 1.0))
+        ceramic.setShininess(48.0)
+        model_root.setMaterial(ceramic, 1)
+        model_root.setDepthOffset(1)  # Suppress self-shadow acne on thin parts of the model.
+
+        ambient = AmbientLight("ambient")
+        ambient.setColor(Vec4(0.22, 0.24, 0.28, 1.0))
+        ambient_node = scene_root.attachNewNode(ambient)
+
+        key = DirectionalLight("key")
+        key.setColor(Vec4(0.20, 0.23, 0.28, 1.0))
+        key.setDirection(Vec3(-0.5, 1.0, -0.2))
+        key_node = scene_root.attachNewNode(key)
+
+        self.render.clearLight()
+        self.render.setLight(ambient_node)
+        self.render.setLight(key_node)
+
+        spot_light = Spotlight("front-key")
+        spot_light.setColor(Vec4(0.95, 0.88, 0.76, 1.0))
+        spot_light.setShadowCaster(True, 2048, 2048)
+        spot_light.setCameraMask(BitMask32.bit(1))
+        spot_lens = PerspectiveLens()
+        spot_lens.setFov(85.0)
+        spot_lens.setNearFar(0.05, 3.0)
+        spot_light.setLens(spot_lens)
+        self._spotlight_node = scene_root.attachNewNode(spot_light)
+        self.render.setLight(self._spotlight_node)
+
+        self._room_node = scene_root.attachNewNode("cornell-room")
+        self._prop_models = {
+            "box": self.loader.loadModel("models/box"),
+            "sphere": self.loader.loadModel("models/misc/sphere"),
+        }
+        self._rebuild_room_geometry()
+        self._update_room_lighting()
 
         self._scene_root = scene_root
         self._cube_node = model_root
 
-        self._apply_model(self._current_model_path)
-
-        # --- Lighting setup ---
-        # Tiny ambient to lift darkest areas without washing out shadows
-        ambient = AmbientLight("ambient")
-        ambient.setColor(Vec4(0.06, 0.06, 0.06, 1.0) * 0.1)
-        ambient_node = scene_root.attachNewNode(ambient)
-
-        # Key light: ceiling spotlight (only shadow-casting light)
-        spot_light = Spotlight("ceiling-spot")
-        spot_light.setColor(Vec4(1.0, 0.98, 0.92, 1.0) * 1.4)
-        spot_lens = PerspectiveLens()
-        spot_lens.setFov(60.0)
-        spot_lens.setNearFar(0.02, 5.0)
-        spot_light.setLens(spot_lens)
-        spot_light.setShadowCaster(True, 1024, 1024)
-        self._spotlight_node = scene_root.attachNewNode(spot_light)
-
-        # Wall bounce fills (no shadows): slight tints to mimic color bleed
-        left_fill = DirectionalLight("left_bounce")
-        left_fill.setColor((0.10, 0.15, 0.10, 1))   # green-ish if left wall is green
-        left_node = scene_root.attachNewNode(left_fill)
-        left_node.setHpr(90, -10, 0)
-
-        right_fill = DirectionalLight("right_bounce")
-        right_fill.setColor((0.15, 0.10, 0.10, 1))  # red-ish if right wall is red
-        right_node = scene_root.attachNewNode(right_fill)
-        right_node.setHpr(-90, -10, 0)
-
-        # Floor bounce: gentle upward fill (no shadows)
-        up_fill = DirectionalLight("floor_hemi")
-        up_fill.setColor((0.12, 0.12, 0.12, 1))
-        up_node = scene_root.attachNewNode(up_fill)
-        up_node.setHpr(0, 60, 0)  # tilt upward to light undersides
-
-        # Apply lights (spot is positioned later in _update_room_lighting)
-        self.render.clearLight()
-        self.render.setLight(ambient_node)
-        self.render.setLight(self._spotlight_node)
-        self.render.setLight(left_node)
-        self.render.setLight(right_node)
-        self.render.setLight(up_node)
-
-        self._room_node = scene_root.attachNewNode("cornell-room")
-        self._room_node.setTwoSided(True)
-        self._rebuild_room_geometry()
-        self._update_room_lighting()
-
     def _apply_model(self, model_path: str) -> None:
-        """Load a model, normalize its scale, and mount it under the cube root."""
-        if getattr(self, "_cube_node", None) is None:
-            raise RuntimeError("Model root is not initialized")
-
-        for child in self._cube_node.getChildren():
+        """Replace the foreground model while retaining its selected depth."""
+        model_root = self._cube_node
+        for child in model_root.getChildren():
             child.removeNode()
-
+        target_size_m = self.app_config.model_max_size_mm / 1000.0
+        model_root.clearColor()
         model = self.loader.loadModel(model_path)
         if model.isEmpty():
-            raise RuntimeError(f"Failed to load model '{model_path}'")
-        model.reparentTo(self._cube_node)
+            raise RuntimeError(
+                f"Failed to load model '{model_path}'. Update config.model_path to a valid Panda3D model."
+            )
+
+        model.reparentTo(model_root)
 
         min_bound, max_bound = model.getTightBounds()
         if min_bound is None or max_bound is None:
@@ -252,40 +261,49 @@ class HoloFrameApp(ShowBase):
         center = (min_bound + max_bound) * 0.5
         size = max_bound - min_bound
         model.setPos(-center)
-        self._cube_node.setH(-25)
-
-        target_size_m = getattr(self, "_model_target_size_m", None)
-        if target_size_m is None:
-            raise RuntimeError("Model target size is not initialized")
 
         max_dim = max(size.x, size.y, size.z, 1e-6)
         scale_factor = target_size_m / max_dim
-        self._cube_node.setScale(scale_factor)
+        model_root.setScale(scale_factor)
 
-        depth_half = size.y * 0.5 * scale_factor
-        self._cube_node.setPos(0.0, depth_half + 0.05, 0.0)
 
-        self._cube_node.clearColor()
         if model_path == "models/box":
-            self._cube_node.setColor(0.25, 0.6, 0.95, 1.0)
+            model_root.setColor(0.25, 0.6, 0.95, 1.0)
 
-        self._cube_node.setShaderAuto()
-        self._current_model_path = model_path
-
-        if model_path in self._model_cycle:
-            self._model_index = self._model_cycle.index(model_path)
-
-        print(f"[HoloFrame] Active model: {model_path}")
 
     def _cycle_model(self) -> None:
-        """Advance to the next model in the rotation and reload it."""
-        if not getattr(self, "_model_cycle", None):
-            raise RuntimeError("Model cycle is not defined")
+        """Advance through the bundled models."""
+        self._model_index = (self._model_index + 1) % len(self._model_cycle)
+        self._apply_model(self._model_cycle[self._model_index])
 
-        next_index = (self._model_index + 1) % len(self._model_cycle)
-        next_path = self._model_cycle[next_index]
-        self._model_index = next_index
-        self._apply_model(next_path)
+    def _toggle_fullscreen(self) -> None:
+        """Toggle a windowed preview and the originally selected full-monitor view."""
+        self._fullscreen = not self._fullscreen
+        props = WindowProperties(self._fullscreen_properties)
+        if not self._fullscreen:
+            props.setFullscreen(False)
+            props.setUndecorated(False)
+            props.setSize(960, 600)
+        self.win.requestProperties(props)
+
+    def _toggle_instructions(self) -> None:
+        """Toggle the controls overlay."""
+        self._instructions_visible = not self._instructions_visible
+        self._apply_hud_visibility()
+
+    def _toggle_hud_visibility(self) -> None:
+        """Toggle all HUD widgets."""
+        self._hud_visible = not self._hud_visible
+        self._apply_hud_visibility()
+
+    def _apply_hud_visibility(self) -> None:
+        """Keep the depth readout and help consistent with the HUD toggle."""
+        for widget in (self.pose_text, self.fps_text, self.room_text, self.model_depth_text):
+            widget.show() if self._hud_visible else widget.hide()
+        if self._hud_visible and self._instructions_visible:
+            self.instructions_text.show()
+        else:
+            self.instructions_text.hide()
 
     def _make_panel(self, name: str, corners, normal) -> GeomNode:
         """Create a rectangular panel geometry from four corner points and a normal."""
@@ -360,46 +378,86 @@ class HoloFrameApp(ShowBase):
         floor = self._room_node.attachNewNode(
             self._make_panel("room-floor", floor_corners, (0.0, 0.0, 1.0))
         )
-        floor.setColor(0.7, 0.7, 0.7, 1.0)
+        floor.setColor(0.70, 0.67, 0.61, 1.0)
 
         ceiling = self._room_node.attachNewNode(
             self._make_panel("room-ceiling", ceiling_corners, (0.0, 0.0, -1.0))
         )
         ceiling.setColor(0.8, 0.8, 0.8, 1.0)
 
-        light_half_w = width * 0.1
-        light_half_d = depth * 0.1
-        light_center_y = depth * 0.5
-        light_z = half_h - 0.01
-        light_back = light_center_y + light_half_d
-        light_front = light_center_y - light_half_d
-        ceiling_light_corners = [
-            (-light_half_w, light_back, light_z),
-            (light_half_w, light_back, light_z),
-            (light_half_w, light_front, light_z),
-            (-light_half_w, light_front, light_z),
-        ]
-        ceiling_light = self._room_node.attachNewNode(
-            self._make_panel("room-ceiling-light", ceiling_light_corners, (0.0, 0.0, -1.0))
-        )
-        ceiling_light.setColor(10.0, 10.0, 10.0, 1.0)
-
         left_wall = self._room_node.attachNewNode(
             self._make_panel("room-left", left_wall_corners, (1.0, 0.0, 0.0))
         )
-        left_wall.setColor(0.63, 0.06, 0.06, 1.0)
+        left_wall.setColor(0.44, 0.20, 0.17, 1.0)
 
         right_wall = self._room_node.attachNewNode(
             self._make_panel("room-right", right_wall_corners, (-1.0, 0.0, 0.0))
         )
-        right_wall.setColor(0.16, 0.6, 0.18, 1.0)
+        right_wall.setColor(0.19, 0.34, 0.29, 1.0)
 
         back_wall = self._room_node.attachNewNode(
             self._make_panel("room-back", back_wall_corners, (0.0, -1.0, 0.0))
         )
-        back_wall.setColor(0.8, 0.8, 0.8, 1.0)
+        back_wall.setColor(0.76, 0.73, 0.67, 1.0)
+
+        self._add_room_grid(width, height, depth)
+        self._add_room_objects(width, height, depth)
 
         self._update_room_lighting()
+
+    def _add_room_objects(self, width: float, height: float, depth: float) -> None:
+        """Place three floor-supported reference objects at distinct, room-relative depths."""
+        def place(name, shape, dimensions, x, y, heading, color):
+            root = self._room_node.attachNewNode(name)
+            model = self._prop_models[shape].copyTo(root)
+            low, high = model.getTightBounds()
+            size = high - low
+            model.setPos(-(low + high) * 0.5)
+            root.setScale(*(dimension / size[i] for i, dimension in enumerate(dimensions)))
+            root.setH(heading)
+            root.setPos(x, y, -height * 0.5 + dimensions[2] * 0.5)
+            root.setTextureOff(1)
+            root.setColor(1, 1, 1, 1, 1)
+            material = Material(name)
+            material.setDiffuse(Vec4(*color, 1))
+            material.setAmbient(Vec4(*color, 1))
+            material.setSpecular(Vec4(0.06, 0.06, 0.06, 1))
+            material.setShininess(18)
+            root.setMaterial(material, 1)
+            root.setDepthOffset(1)
+
+        side = min(0.07, width * 0.21, depth * 0.19)
+        place("tall-back-left-block", "box", (side, side, height * 0.65),
+              -width * 0.28, depth * 0.72, 18, (0.78, 0.75, 0.68))
+        place("short-mid-right-block", "box", (side * 0.8, side * 0.8, height * 0.26),
+              width * 0.20, depth * 0.35, -15, (0.65, 0.67, 0.66))
+        diameter = min(0.045, width * 0.18, height * 0.24)
+        place("distant-sphere", "sphere", (diameter,) * 3,
+              width * 0.40, depth * 0.84, 0, (0.72, 0.65, 0.52))
+
+    def _add_room_grid(self, width: float, height: float, depth: float) -> None:
+        """Add fixed 50 mm seams so the floor and back wall reveal perspective and parallax."""
+        lines = LineSegs("room-seams")
+        lines.setThickness(1.0)
+        lines.setColor(0.10, 0.10, 0.10, 0.18)
+        half_w, half_h = width * 0.5, height * 0.5
+        offset = 0.0003  # Keep seams just above the surfaces to avoid z-fighting.
+        for x in np.arange(-half_w + 0.05, half_w, 0.05):
+            lines.moveTo(x, 0, -half_h + offset)
+            lines.drawTo(x, depth, -half_h + offset)
+            lines.moveTo(x, depth - offset, -half_h)
+            lines.drawTo(x, depth - offset, half_h)
+        for y in np.arange(0.05, depth, 0.05):
+            lines.moveTo(-half_w, y, -half_h + offset)
+            lines.drawTo(half_w, y, -half_h + offset)
+        for z in np.arange(-half_h + 0.05, half_h, 0.05):
+            lines.moveTo(-half_w, depth - offset, z)
+            lines.drawTo(half_w, depth - offset, z)
+        seams = self._room_node.attachNewNode(lines.create())
+        seams.setLightOff()
+        seams.setShaderOff()
+        seams.setTransparency(TransparencyAttrib.MAlpha)
+        seams.hide(BitMask32.bit(1))  # Surface markings must not cast their own shadows.
 
     def _set_room_width(self, width: float) -> None:
         """Apply a new room width value and rebuild the geometry."""
@@ -440,141 +498,59 @@ class HoloFrameApp(ShowBase):
         """Handle keyboard input to pull the back wall closer."""
         self._set_room_depth(self.room_depth - self._room_depth_step)
 
+    def _set_model_depth(self, depth_m: float) -> None:
+        """Move only the model; zero centers it on the physical screen plane."""
+        depth_m = min(0.2, max(-0.2, float(depth_m)))
+        self._cube_node.setY(depth_m)
+        position = "at screen" if abs(depth_m) < 0.0005 else (
+            "behind screen" if depth_m > 0 else "in front of screen"
+        )
+        self.model_depth_text.setText(
+            f"Model center: {abs(depth_m) * 1000:.0f}mm {position}\n"
+            "W/S: nearer/further   C: screen plane   R: reset"
+        )
+
+    def _move_model_depth(self, step_m: float) -> None:
+        """Adjust the model depth in 10 mm keyboard steps."""
+        self._set_model_depth(self._cube_node.getY() + step_m)
+
+    def _reset_model_depth(self) -> None:
+        """Restore the configured starting depth."""
+        self._set_model_depth(self._initial_model_depth_m)
+
     def _update_room_lighting(self) -> None:
-        """Reposition the ceiling spotlight so it stays centered above the room."""
+        """Light from above the viewer side so protruding objects cast shadows into the room."""
         if self._spotlight_node is None:
             raise RuntimeError("Spotlight node is not set")
 
         height = max(self._room_min_height, float(self.room_height))
         depth = max(self._room_min_depth, float(self.room_depth))
 
-        # Centered under the ceiling, aimed toward the room center
-        self._spotlight_node.setPos(0.0, -depth * 0.5, height * 0.5)
-        self._spotlight_node.lookAt(0.0, depth * 0.5, 0.0)
-
-    def _log_available_models(self) -> None:
-        vfs = VirtualFileSystem.getGlobalPtr()
-        model_path = getModelPath()
-        found = set()
-
-        def scan(directory, prefix: str) -> None:
-            if directory.empty():
-                return
-            file_list = vfs.scanDirectory(directory)
-            if file_list is None:
-                return
-            for i in range(file_list.getNumFiles()):
-                vfile = file_list.getFile(i)
-                filename = vfile.getFilename()
-                basename = filename.getBasename()
-                if vfile.isDirectory():
-                    scan(filename, prefix + basename + "/")
-                    continue
-                name_lower = basename.lower()
-                if name_lower.endswith((".egg", ".bam", ".egg.pz", ".bam.pz")):
-                    trimmed = basename
-                    if trimmed.lower().endswith(".pz"):
-                        trimmed = trimmed[:-3]
-                    if trimmed.lower().endswith(".egg"):
-                        trimmed = trimmed[:-4]
-                    elif trimmed.lower().endswith(".bam"):
-                        trimmed = trimmed[:-4]
-                    found.add(prefix + trimmed)
-
-        for i in range(model_path.getNumDirectories()):
-            scan(model_path.getDirectory(i), "")
-
-        if not found:
-            print("[HoloFrame] No Panda3D models found on model-path")
-            return
-
-        print("[HoloFrame] Panda3D models available:")
-        for name in sorted(found):
-            print(f"  - {name}")
+        self._spotlight_node.setPos(-0.12, -0.45, height * 0.5 + 0.12)
+        self._spotlight_node.lookAt(0.0, depth * 0.3, height * -0.5)
+        self._spotlight_node.node().getLens().setFar(max(3.0, depth + height + self.room_width))
 
     def _apply_camera_pose(self, cam_pos_mm: np.ndarray) -> None:
-        """Place the Panda3D camera based on the smoothed head translation."""
-        pos = cam_pos_mm.astype(np.float32)
-        x_m = -float(pos[0]) * 0.001
-        y_m = -float(pos[2]) * 0.001
-        z_m = -float(pos[1]) * 0.001
-
-        if y_m > -0.05:
-            y_m = -0.05
-
-        self.camera.setPos(x_m, y_m, z_m)
-
-        if getattr(self, "_cube_node", None) is None:
-            raise RuntimeError("Model root is not initialized")
-
-        self.camera.lookAt(self._cube_node)
-
-    def _toggle_instructions(self) -> None:
-        """Show or hide the on-screen controls cheat sheet."""
-        self._instructions_visible = not self._instructions_visible
-        self._apply_hud_visibility()
-
-    def _toggle_hud_visibility(self) -> None:
-        """Show or hide the HUD overlays with a single toggle."""
-        self._hud_visible = not self._hud_visible
-        self._apply_hud_visibility()
-
-    def _toggle_fullscreen(self) -> None:
-        """Switch the Panda3D window between fullscreen and windowed modes."""
-        self._fullscreen = not self._fullscreen
-
-        props = WindowProperties()
-        if self._fullscreen:
-            display_w = self.pipe.getDisplayWidth() if self.pipe else 0
-            display_h = self.pipe.getDisplayHeight() if self.pipe else 0
-            if display_w <= 0 or display_h <= 0:
-                # If we fail to query the display, keep the previous mode.
-                self._fullscreen = False
-                return
-            props.setSize(display_w, display_h)
-            props.setFullscreen(True)
-            props.setUndecorated(True)
-        else:
-            props.setFullscreen(False)
-            props.setUndecorated(False)
-            props.setSize(1280, 720)
-
-        if self.win is not None:
-            self.win.requestProperties(props)
-
-    def _apply_hud_visibility(self) -> None:
-        """Update HUD widget visibility to match toggle state."""
-        if self._hud_visible:
-            self.pose_text.show()
-            self.fps_text.show()
-            self.room_text.show()
-            if self._instructions_visible:
-                self.instructions_text.show()
-            else:
-                self.instructions_text.hide()
-        else:
-            self.pose_text.hide()
-            self.fps_text.hide()
-            self.room_text.hide()
-            self.instructions_text.hide()
+        """Keep the screen fixed while moving the eye and its off-axis frustum."""
+        apply_screen_projection(self.camera, self.camLens, cam_pos_mm,
+                                self.app_config.screen_width_mm, self.screen_height_mm)
 
     def _update_task(self, task: Task) -> int:
         ok, frame = self.cap.read()
-        if not ok:
-            return Task.cont
-
-        frame_time = time.time()
+        frame_time = time.perf_counter()
         dt_motion = max(0.0, frame_time - self.motion_t_prev)
-
-        h, w = frame.shape[:2]
-        focal = w
-        K = np.array(
-            [[focal, 0.0, w / 2.0], [0.0, focal, h / 2.0], [0.0, 0.0, 1.0]],
-            dtype=np.float32,
-        )
-        dist = np.zeros((4, 1), dtype=np.float32)
-
-        estimate = self.tracker.process(frame, frame_time, K, dist)
+        estimate = HeadPoseEstimate(False, None)
+        if ok and frame is not None:
+            h, w = frame.shape[:2]
+            focal = w  # Approximate webcam intrinsics; actual returned frame dimensions.
+            K = np.array(
+                [[focal, 0.0, w / 2.0], [0.0, focal, h / 2.0], [0.0, 0.0, 1.0]],
+                dtype=np.float32,
+            )
+            dist = np.zeros((4, 1), dtype=np.float32)
+            estimate = self.tracker.process(frame, frame_time, K, dist)
+        else:
+            self.tracker.mark_lost()
 
         if estimate.detected and estimate.position_mm is not None:
             self.cam_pos_display = estimate.position_mm.astype(np.float32)
@@ -584,7 +560,7 @@ class HoloFrameApp(ShowBase):
                 f"z={self.cam_pos_display[2]:+.1f}"
             )
         else:
-            pose_text = "No face"
+            pose_text = "No face" if ok and frame is not None else "Camera unavailable"
             lerp = 1.0 - math.exp(-self.app_config.recenter_lerp_rate * dt_motion)
             lerp = float(min(max(lerp, 0.0), 1.0))
             self.cam_pos_display = self.cam_pos_display + (
@@ -592,11 +568,9 @@ class HoloFrameApp(ShowBase):
             ) * lerp
             self.cam_pos_display = self.cam_pos_display.astype(np.float32)
 
-        # Cube renderer retained for future 3D work; intentionally not invoked for now.
-
         self.motion_t_prev = frame_time
 
-        t_now = time.time()
+        t_now = time.perf_counter()
         fps = 1.0 / max(1e-6, (t_now - self.t_prev))
         self.t_prev = t_now
         self.fps_avg = fps if self.fps_avg is None else (self.fps_avg * 0.9 + fps * 0.1)
@@ -634,13 +608,14 @@ class HoloFrameApp(ShowBase):
 
 # ---------- Main ----------
 def main():
-    loadPrcFileData("", "load-display pandagl")
-    loadPrcFileData("", "framebuffer-srgb true")
     loadPrcFileData("", "win-size 800 600")
     loadPrcFileData("", "undecorated 1")
 
     app = HoloFrameApp()
-    app.run()
+    try:
+        app.run()
+    finally:
+        app.destroy()
 
 if __name__ == "__main__":
     main()

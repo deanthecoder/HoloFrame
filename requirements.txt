@@ -1,0 +1,5 @@
+# Tested on Python 3.12. FaceMesh requires MediaPipe's legacy solutions API.
+mediapipe==0.10.21
+numpy==1.26.4
+opencv-contrib-python==4.11.0.86
+panda3d==1.10.16

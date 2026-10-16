@@ -1,4 +1,14 @@
-Try to stick to the requirements, keeping the code simple.
-For example, if I ask for code that allows a model file to be loaded, no need to adding fallback options - Just throw if the requirements are not met.
-Most functions should have at least a one line comment at their start - More if the code is complicated.  Ditto for classes - A short summary would be good.
-If the requirements are not clear, ask before implementating stuff.
+# Agents
+This placeholder describes the assistant agents that will support HoloFrame as the project grows.
+
+## Purpose
+- Collect design goals for any automation agents that orchestrate builds, testing, or deployment.
+- Track responsibilities for each agent and how they interact with the Panda3D application.
+- Serve as a staging area before details migrate into the main documentation set.
+
+## Next Steps
+- Define the first agent's role and scope.
+- Document required inputs, outputs, and safety constraints.
+- Capture integration points with the existing Python modules.
+
+_Update this file as agent designs become concrete._

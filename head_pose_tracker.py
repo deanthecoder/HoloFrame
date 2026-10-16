@@ -60,8 +60,9 @@ class HeadPoseEstimate:
 
 
 class HeadPoseTracker:
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, screen_height_mm: float):
         self._config = config
+        self._webcam_height_mm = screen_height_mm * 0.5 + config.webcam_above_screen_mm
         self._face_mesh = mp.solutions.face_mesh.FaceMesh(
             static_image_mode=False,
             max_num_faces=1,
@@ -85,7 +86,7 @@ class HeadPoseTracker:
         res = self._face_mesh.process(rgb)
 
         if not res.multi_face_landmarks:
-            self._had_face = False
+            self.mark_lost()
             return HeadPoseEstimate(False, None)
 
         lm2d = res.multi_face_landmarks[0].landmark
@@ -106,15 +107,22 @@ class HeadPoseTracker:
         )
 
         if not ok_pnp or inliers is None or len(inliers) < 6:
-            self._had_face = False
+            self.mark_lost()
             return HeadPoseEstimate(False, None)
 
-        raw = np.array([
-            float(tvec[0, 0]),
-            float(tvec[1, 0]),
-            float(tvec[2, 0]),
+        # Midpoint of the four eye corners in the same model coordinates as PnP.
+        eye_model = MODEL_POINTS[[3, 4, 7, 8]].mean(axis=0)
+        rotation, _ = cv2.Rodrigues(rvec)
+        eye_camera = (rotation @ eye_model + tvec.reshape(3)) * self._config.translation_scale
+        # A camera facing the viewer sees screen-right on its image's left.
+        scaled = np.array([
+            self._config.webcam_horizontal_offset_mm - eye_camera[0],
+            self._webcam_height_mm - eye_camera[1],
+            eye_camera[2],
         ], dtype=np.float32)
-        scaled = raw * self._config.translation_scale
+        if not np.isfinite(scaled).all() or scaled[2] < 50.0:
+            self.mark_lost()
+            return HeadPoseEstimate(False, None)
 
         if not self._had_face:
             for axis, value in zip(("x", "y", "z"), scaled):
@@ -131,6 +139,10 @@ class HeadPoseTracker:
 
     def close(self) -> None:
         self._face_mesh.close()
+
+    def mark_lost(self) -> None:
+        """Reset temporal continuity after missing frames or rejected poses."""
+        self._had_face = False
 
 
 __all__ = ["HeadPoseTracker", "HeadPoseEstimate", "LANDMARK_ORDER", "MODEL_POINTS"]
