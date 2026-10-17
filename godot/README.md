@@ -61,23 +61,30 @@ bake; after changing the room or its lights, select its LightmapGI node in the
 Godot editor and click **Bake Lightmaps**, then save the scene.
 
 One box-projected ReflectionProbe captures the room, while screen-space
-reflections add visible detail. The webcam image adds a small, partial reflection
+reflections add visible detail. The webcam image adds a broad, partial reflection
 on every surface. All materials remain dielectric; the matte walls have high
 roughness so they reflect light without looking glossy.
 
-Webcam reflections use the same approximate intrinsics as head tracking, with
+Webcam reflections start from the same approximate intrinsics as head tracking, with
 the camera's height above screen center and the saved seating offset applied.
 Reflected rays sample the image on a plane at the tracked eye distance. This
-corrects the former height and field-of-view mismatch; it remains an approximation
+corrects the former height mismatch. The image is spread more broadly over curved
+surfaces so its blurred details remain visible; it remains an approximation
 for a room with objects at different depths. Exact alignment requires measured
 webcam intrinsics and its position relative to the screen. The original capture's
 aspect ratio is sent with the pose, so resizing the stream does not alter the mapping.
+The viewer-side fill light provides diffuse illumination and a restrained
+specular highlight on the teapot.
 
 SSIL uses a 150 mm radius and 1.0 intensity to complement the baked lighting.
 
 The teapot's source and attribution are in [models/TEAPOT_ATTRIBUTION.txt](models/TEAPOT_ATTRIBUTION.txt).
 
 ## Capture a comparison frame
+
+While the app is running, press **S** to save the current view as a PNG in your
+Downloads folder. The screenshot includes the live webcam reflection, and the
+brief save confirmation appears only after the image is captured.
 
 ```sh
 /Applications/Godot.app/Contents/MacOS/Godot --path godot -- --capture /tmp/holoframe-godot.png

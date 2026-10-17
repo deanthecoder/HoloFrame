@@ -12,6 +12,7 @@ var eye_offset_mm := Vector3.ZERO
 var screen_width_m := 0.3024
 var calibration_notice: Label
 var notice_seconds := 0.0
+var screenshot_pending := false
 var camera: Camera3D
 var pose_socket := PacketPeerUDP.new()
 var image_socket := PacketPeerUDP.new()
@@ -72,11 +73,13 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	# Calibrate from a comfortable seat, or close the full-screen window.
+	# Calibrate, capture the current view, or close the full-screen window.
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
 	if event.keycode == KEY_ESCAPE:
 		get_tree().quit()
+	elif event.keycode == KEY_S:
+		_take_screenshot()
 	elif event.keycode == KEY_C:
 		eye_offset_mm = Vector3.ZERO if event.shift_pressed else Vector3(-target_eye_mm.x, -target_eye_mm.y, 0.0)
 		var settings := ConfigFile.new()
@@ -90,6 +93,43 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		notice_seconds = 4.0
 		eye_mm = target_eye_mm
 		_apply_projection()
+
+
+func _take_screenshot() -> void:
+	if screenshot_pending:
+		return
+	var downloads_dir := OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS)
+	if downloads_dir.is_empty():
+		push_error("Could not find the Downloads folder")
+		return
+	var error := DirAccess.make_dir_recursive_absolute(downloads_dir)
+	if error != OK:
+		push_error("Could not create the Downloads folder: %d" % error)
+		return
+	screenshot_pending = true
+	var path := _next_screenshot_path(downloads_dir)
+	notice_seconds = 0.0
+	calibration_notice.hide()
+	await RenderingServer.frame_post_draw
+	error = get_viewport().get_texture().get_image().save_png(path)
+	screenshot_pending = false
+	if error == OK:
+		print("HOLOFRAME_SCREENSHOT: ", path)
+		calibration_notice.text = "Screenshot saved to Downloads: " + path.get_file()
+	else:
+		push_error("Could not save screenshot to %s: %d" % [path, error])
+		calibration_notice.text = "Could not save screenshot"
+	notice_seconds = 4.0
+
+
+func _next_screenshot_path(downloads_dir: String) -> String:
+	var base_path := downloads_dir.path_join("HoloFrame-" + Time.get_datetime_string_from_system().replace("T", "_").replace(":", "-"))
+	var path := base_path + ".png"
+	var suffix := 2
+	while FileAccess.file_exists(path):
+		path = "%s-%d.png" % [base_path, suffix]
+		suffix += 1
+	return path
 
 
 func _load_calibration() -> void:

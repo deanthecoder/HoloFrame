@@ -6,9 +6,9 @@
 
 HoloFrame uses your webcam to follow your head and adjust the view through your screen. Lean left to look around the teapot, move closer to see more of the room, or look down to reveal its upper surfaces. The scene stays in place while your viewpoint moves—no headset or special glasses required.
 
-![HoloFrame showing a glazed teapot, blocks, and a sphere in a softly lit room with red and green walls](img/HoloFrame.png)
+![HoloFrame showing the Utah teapot with a broad webcam reflection, blocks, and a sphere in a softly lit room](img/HoloFrame.png)
 
-Captured on a 14-inch MacBook Pro with the display calibration applied.
+Captured in-app with a live webcam reflection on a 14-inch MacBook Pro with the display calibration applied.
 
 ## Features
 
@@ -46,6 +46,7 @@ The launcher starts both the app and its webcam tracker. Allow camera access if 
 | --- | --- |
 | **C** | Center the view for your current seating position and save the adjustment. |
 | **Shift+C** | Clear the saved seating adjustment. |
+| **S** | Save a screenshot of the current view to Downloads. |
 | **Escape** | Quit the app and stop the webcam tracker. |
 
 Recalibrate after moving your screen or webcam. The seating adjustment changes horizontal and vertical alignment; distance and head movement remain tracked.
@@ -97,6 +98,12 @@ Check the view, calibration, reflection inputs, and shadow settings:
 
 ```sh
 /Applications/Godot.app/Contents/MacOS/Godot --path godot --script res://tests/check_view.gd
+```
+
+Check the in-game screenshot key with a rendered frame:
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path godot --script res://tests/check_screenshot.gd
 ```
 
 See the [rendering notes](godot/README.md) for lighting settings and screenshot capture commands.
