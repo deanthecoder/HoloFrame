@@ -75,7 +75,7 @@ aspect ratio is sent with the pose, so resizing the stream does not alter the ma
 
 SSIL uses a 150 mm radius and 1.0 intensity to complement the baked lighting.
 
-The teapot's redistribution license is in [models/TEAPOT_LICENSE.txt](models/TEAPOT_LICENSE.txt).
+The teapot's source and attribution are in [models/TEAPOT_ATTRIBUTION.txt](models/TEAPOT_ATTRIBUTION.txt).
 
 ## Capture a comparison frame
 

@@ -227,6 +227,8 @@ func _set_capture_if_requested() -> void:
 
 
 func _capture_after_delay(path: String) -> void:
+	notice_seconds = 0.0
+	calibration_notice.hide()
 	# Wait for imported meshes, sky, and shadows to finish their first frames.
 	await get_tree().create_timer(2.0).timeout
 	await RenderingServer.frame_post_draw

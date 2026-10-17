@@ -105,4 +105,4 @@ See the [rendering notes](godot/README.md) for lighting settings and screenshot 
 
 ## License
 
-HoloFrame's source code is available under the [MIT License](LICENSE). The teapot asset is distributed under its own [BSD license](godot/models/TEAPOT_LICENSE.txt).
+HoloFrame's source code is available under the [MIT License](LICENSE). The scene uses the [Utah Teapot](https://graphics.cs.utah.edu/teapot/) model; its [attribution and terms](godot/models/TEAPOT_ATTRIBUTION.txt) are documented separately.

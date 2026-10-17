@@ -1,0 +1,11 @@
+Utah Teapot, 2026 version by Cem Yuksel.
+Based on the historic Utah Teapot developed at the University of Utah.
+
+Source: https://graphics.cs.utah.edu/teapot/
+Downloaded as a y-up triangle mesh at resolution 16, with the round bottom,
+interior, trimmed handle and spout, and curvature-continuous surfaces.
+
+The University of Utah Graphics Lab makes the model files freely available for
+any use, including commercial use. Its terms of use and attribution request
+are published at the source URL above. The model is provided as is, without
+warranty.
