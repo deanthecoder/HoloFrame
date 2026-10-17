@@ -1,139 +1,108 @@
-[![Twitter URL](https://img.shields.io/twitter/url/https/twitter.com/deanthecoder.svg?style=social&label=Follow%20%40deanthecoder)](https://twitter.com/deanthecoder)
+[![Follow @deanthecoder](https://img.shields.io/twitter/url/https/twitter.com/deanthecoder.svg?style=social&label=Follow%20%40deanthecoder)](https://twitter.com/deanthecoder) [![GitHub stars](https://img.shields.io/github/stars/deanthecoder/HoloFrame?style=social&label=Star)](https://github.com/deanthecoder/HoloFrame/stargazers)
 
 # HoloFrame
-HoloFrame is a Panda3D experiment that renders a head-tracked scene based on live webcam input.
+
+**Turn your screen into a window into a 3D world.**
+
+HoloFrame uses your webcam to follow your head and adjust the view through your screen. Lean left to look around the teapot, move closer to see more of the room, or look down to reveal its upper surfaces. The scene stays in place while your viewpoint moves—no headset or special glasses required.
+
+![HoloFrame showing a glazed teapot, blocks, and a sphere in a softly lit room with red and green walls](img/HoloFrame.png)
+
+Captured on a 14-inch MacBook Pro with the display calibration applied.
 
 ## Features
-- Real-time head pose tracking via MediaPipe FaceMesh and solvePnPRansac.
-- One Euro filter smoothing for stable camera motion.
-- Off-axis perspective through a fixed screen aperture, with a stationary 3D scene.
-- Borderless Windows viewer that prefers the active built-in laptop display.
-- Adjustable room dimensions and lighting.
-- Glazed ceramic highlights, a shadow-casting front light, and 50 mm floor/back-wall
-  seams provide depth cues as the viewer or model moves.
-- A tall rotated block, a shorter block, and a distant sphere provide fixed depth
-  references in a warm Cornell-style room. They stay on the floor as room dimensions
-  change; the model depth controls still move only the foreground model.
-- On-screen status for pose, frame timing, and virtual room size.
-- Modular utilities for pose math, rendering, and configuration tweaking.
 
-## Requirements
-- Python 3.12 (tested)
-- A webcam accessible by OpenCV
-- Windows, macOS, or Linux capable of running Panda3D
+- **A window that follows your viewpoint.** Perspective changes with your eye position, keeping the screen's edges fixed as you move.
+- **A room with depth.** A floating teapot, two blocks, and a distant sphere give you objects to look around and compare.
+- **Soft lighting and shadows.** Baked indirect lighting, live shadows, ambient occlusion, and subtle color bounce give the room its shape.
+- **A glimpse of your surroundings.** The webcam adds blurred reflections to the scene's materials, alongside reflections of the virtual room.
+- **Smooth movement.** Filtered head tracking steadies the view and holds the last position when your face briefly disappears.
+- **Remembered setup.** Center the view with a keypress; HoloFrame remembers your seating adjustment and successful camera choice.
 
-Install the runtime dependencies:
+## Quick start
 
-```bash
-python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
+The current launcher is for **macOS**, tested on a **14-inch MacBook Pro (2021, M1 Pro)**. You'll need a webcam, [Python 3.12](https://www.python.org/downloads/), and [Godot 4.7](https://godotengine.org/download/macos/) installed as `/Applications/Godot.app`. The scene uses Godot's Forward+ renderer.
+
+Clone the project and install its Python dependencies:
+
+```sh
+git clone https://github.com/deanthecoder/HoloFrame.git
+cd HoloFrame
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
-## Usage
-Run the Panda3D application from the project root:
+Then launch HoloFrame:
 
-```bash
-.venv\Scripts\python HoloFrame.py
+```sh
+./run_godot.sh
 ```
 
-Allow the webcam feed to stabilize while the app locates your face. The on-screen pose readout switches from `No face` to live coordinates once tracking succeeds.
-
-On macOS/Linux, use `.venv/bin/python` in these commands. Automatic built-in display
-selection currently applies to Windows; other platforms use Panda3D's default display.
-The pinned MediaPipe version provides the legacy FaceMesh API. Do not upgrade it
-independently. Only OpenCV's contrib distribution is needed; avoid installing
-`opencv-python` alongside it, as both provide `cv2`.
+The launcher starts both the app and its webcam tracker. Allow camera access if macOS asks, sit where you normally use your screen, and give it a moment to find your face. Press **C** to center the view on the teapot, then move your head gently to explore.
 
 ## Controls
-- `ESC`: Exit the application.
-- `F`: Toggle a windowed preview/full-monitor view (calibrated projection assumes full-monitor view).
-- `H`: Toggle the HUD.
-- `?`: Toggle controls help.
-- `M`: Cycle the foreground model.
-- `V`: Toggle webcam-driven lighting and soft reflections for comparison.
-- `Left / Right`: Shrink or expand the virtual room width.
-- `Down / Up`: Shrink or expand the virtual room height.
-- `L / P`: Shrink or expand the virtual room depth.
-- `W / S`: Move the model nearer/further in 10 mm steps (hold to repeat).
-- `C`: Center the model on the screen plane, so it straddles the screen.
-- `R`: Reset the model to its starting position (100 mm in front of the screen).
 
-The depth readout describes the **model center**, with a range of 200 mm in front
-of to 200 mm behind the screen. Moving the model does not move the room or alter
-the projection/calibration. Depth adjustments last for the current session.
+| Key | Action |
+| --- | --- |
+| **C** | Center the view for your current seating position and save the adjustment. |
+| **Shift+C** | Clear the saved seating adjustment. |
+| **Escape** | Quit the app and stop the webcam tracker. |
 
-## Configuration
-`config.AppConfig` centralizes tuning values:
-- `screen_width_mm`: Physical screen width; defaults to 344 mm, approximately a
-  15.6-inch 16:9 laptop. Height is derived from the selected display's pixel aspect ratio.
-- `webcam_above_screen_mm`: Camera center above the active screen area (default 8 mm).
-- `webcam_horizontal_offset_mm`: Camera center relative to screen center, positive right.
-- `webcam_index`: OpenCV camera index (default 0); display selection does not select a webcam.
-- `monitor_index`: Optional Windows display override. Startup prints the available
-  indices, ordered by desktop position. Otherwise, prefer an active internal panel,
-  then the primary display. A closed/disabled laptop panel is not selected.
-- `translation_scale`: Face-model units to approximate millimeters (default 0.125).
-- `recenter_lerp_rate`: Speed used when lerping back to the default camera.
-- `model_max_size_mm`: Maximum dimension of the displayed model.
-- `model_depth_mm`: Starting model-center depth; defaults to -100 mm (in front of the screen).
-- `model_path`: Panda3D model to load.
-- `default_camera_pos_mm`: Resting eye position `(right, up, distance)` relative to
-  screen center, in millimeters; defaults to `(0, 0, 600)`.
-- `smoothing_*`: Parameters for the One Euro filters applied to head pose data.
-- `webcam_light_strength`: Strength of each of the four broad webcam-derived fill lights (default 0.12).
-- `webcam_reflection_strength`: Additive reflection strength on the foreground model (default 0.18).
-- `webcam_smoothing_seconds`: Response time for lighting/reflection changes (default 0.8 seconds).
+Recalibrate after moving your screen or webcam. The seating adjustment changes horizontal and vertical alignment; distance and head movement remain tracked.
 
-Adjust these values before launching the app to match your environment.
+## Match your display
 
-The default calibration assumes a centered, forward-facing webcam in the top bezel,
-square display pixels, and an average face. These are starting values, not a measurement
-of your laptop or eyes. Measure the active screen width first if the perspective feels
-wrong. External monitors need their own screen width and camera offsets.
+HoloFrame needs your screen's physical size to make it behave like a window. The included [display profile](godot/display_profile.json) is set up for the 14-inch 2021 MacBook Pro running fullscreen below its notch:
 
-The viewer tracks the midpoint between the eyes, including distance. The camera stays
-parallel to the screen, and its asymmetric frustum passes through the screen corners.
-Moving nearer reveals more of the stationary world; objects on the screen plane remain
-fixed. The initial room opening matches the screen dimensions. Room-size controls alter
-the room geometry, not the physical screen calibration. This is a single-viewer,
-monoscopic effect, not separate stereo images for each eye.
+| Setting | Value |
+| --- | --- |
+| Active view width | 302.4 mm |
+| Active view height | 189.8 mm |
+| Webcam center above the active view | Approximately 3.3 mm |
 
-## Project Structure
-- `HoloFrame.py`: Panda3D application loop and scene management.
-- `head_pose_tracker.py`: MediaPipe-based head pose solver with temporal smoothing.
-- `display_selection.py`: Active Windows display discovery and laptop-panel preference.
-- `projection.py`: Fixed-screen off-axis projection.
-- `config.py`: Immutable configuration container.
-- `one_euro.py`: Generic 1-Euro filter implementation.
+For another display, update the profile with the dimensions of the area used by the app and the webcam's height above it. Run fullscreen for the intended perspective. The webcam position and face size are estimates, so calibration is approximate; see the [rendering and calibration notes](godot/README.md) for details.
 
-## Troubleshooting
-- Ensure only one application accesses the webcam.
-- On Windows the window covers the selected monitor without changing its display mode.
-- Keep the MediaPipe/tracker import before Panda3D: the reverse order can cause a native DLL initialization failure on Windows.
-- A failed camera frame shows `Camera unavailable` and recenters smoothly; tracking resumes when frames return.
-- If tracking fails, confirm that Mediapipe was installed successfully and the camera has adequate lighting.
+## Camera setup
 
-## Checks
-Run `.venv\Scripts\python -m unittest -v test_holoframe` for projection invariants,
-display selection, synthetic pose recovery, and failed-frame fallback checks.
+HoloFrame tries the last successful webcam first. If several cameras are available and it doesn't find a face after a second, it tries another. This also helps when an iPhone appears as a Continuity Camera alongside the Mac's built-in camera.
 
-## Webcam lighting and reflections
-The existing camera frames are downsampled and blurred, converted to approximate linear
-RGB, and sampled in four broad regions to drive gentle directional fill lights. A small
-world-aligned cube map adds blurred reflections to the foreground model. The webcam's
-limited view occupies only the viewer-facing directions; unseen directions use a dim,
-neutral fill. This is an artistic approximation, not HDR light measurement or a 3D scan.
-Updates run at most 10 times per second and are smoothed to reduce exposure flicker.
-Failed camera reads fade the contribution away. `V` immediately disables both effects.
-Webcam images stay in memory and are neither saved nor uploaded.
+To choose a camera explicitly, pass its index:
 
-Run `.venv\Scripts\python -m unittest -v` to include the webcam environment checks.
+```sh
+./run_godot.sh 1
+```
 
-## Screenshot
-![Earlier HoloFrame scene](img/screen.png)
+Keep your face well lit and close other apps using the camera if tracking doesn't start. On macOS, check camera access in **System Settings → Privacy & Security → Camera**.
 
-## How It Works
-Webcam landmarks estimate the eye midpoint. The calibrated eye position drives an off-axis camera frustum through the fixed screen corners, rendering the stationary scene from the viewer's position.
+Webcam frames stay on your computer. The tracker sends head position and a small, blurred image to the renderer over localhost; webcam images are neither saved nor uploaded.
+
+## How it works
+
+[MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) and [OpenCV](https://opencv.org/) estimate the midpoint between your eyes. [Godot](https://godotengine.org/) uses that position to render a fixed scene through the physical corners of your screen. Python handles the webcam automatically while Godot handles the scene, lighting, and reflections.
+
+The effect is designed for one viewer and uses a single image for both eyes. Webcam reflections approximate the visible surroundings; they aren't a complete capture of your room. Screen size, camera placement, and tracking accuracy all affect how convincing the window feels.
+
+<details>
+<summary><strong>Working on the scene</strong></summary>
+
+Open [godot/project.godot](godot/project.godot) in the Godot editor to edit the room. The saved lighting bake is included. After changing the room or lighting, select its LightmapGI node, click **Bake Lightmaps**, and save the scene.
+
+Run the Python checks from the repository root:
+
+```sh
+.venv/bin/python -m unittest -v
+```
+
+Check the view, calibration, reflection inputs, and shadow settings:
+
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path godot --script res://tests/check_view.gd
+```
+
+See the [rendering notes](godot/README.md) for lighting settings and screenshot capture commands.
+
+</details>
 
 ## License
-Licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+HoloFrame's source code is available under the [MIT License](LICENSE). The teapot asset is distributed under its own [BSD license](godot/models/TEAPOT_LICENSE.txt).

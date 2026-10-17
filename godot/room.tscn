@@ -1,0 +1,175 @@
+[gd_scene format=3 uid="uid://b7coixdidi8th"]
+
+[ext_resource type="LightmapGIData" uid="uid://x3lvywqj5fnm" path="res://room.lmbake" id="1_88gup"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_v321d"]
+albedo_color = Color(0.7, 0.67, 0.61, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_88gup"]
+lightmap_size_hint = Vector2i(7, 8)
+add_uv2 = true
+size = Vector3(0.344, 0.003, 1.4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bisa2"]
+albedo_color = Color(0.8, 0.8, 0.8, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_4o3f6"]
+lightmap_size_hint = Vector2i(7, 8)
+add_uv2 = true
+size = Vector3(0.344, 0.003, 1.4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_v5vuv"]
+albedo_color = Color(0.44, 0.2, 0.17, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_ka7wq"]
+lightmap_size_hint = Vector2i(6, 10)
+add_uv2 = true
+size = Vector3(0.003, 0.215, 1.4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_x5k2b"]
+albedo_color = Color(0.19, 0.34, 0.29, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_8cv3p"]
+lightmap_size_hint = Vector2i(6, 10)
+add_uv2 = true
+size = Vector3(0.003, 0.215, 1.4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_01y1d"]
+albedo_color = Color(0.76, 0.73, 0.67, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_42v8c"]
+lightmap_size_hint = Vector2i(5, 9)
+add_uv2 = true
+size = Vector3(0.344, 0.215, 0.003)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mb7s7"]
+albedo_color = Color(0.78, 0.75, 0.68, 1)
+roughness = 0.78
+
+[sub_resource type="BoxMesh" id="BoxMesh_xorjj"]
+lightmap_size_hint = Vector2i(5, 7)
+add_uv2 = true
+size = Vector3(0.07, 0.13975, 0.07)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_xwbdb"]
+albedo_color = Color(0.65, 0.67, 0.66, 1)
+roughness = 0.7
+
+[sub_resource type="BoxMesh" id="BoxMesh_voycu"]
+lightmap_size_hint = Vector2i(5, 7)
+add_uv2 = true
+size = Vector3(0.056, 0.0559, 0.056)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_6tcb1"]
+albedo_color = Color(0.72, 0.65, 0.52, 1)
+roughness = 0.4
+
+[sub_resource type="SphereMesh" id="SphereMesh_0f4jx"]
+lightmap_size_hint = Vector2i(2, 2)
+add_uv2 = true
+radius = 0.0225
+height = 0.045
+
+[sub_resource type="StandardMaterial3D" id="CeilingLampMaterial"]
+albedo_color = Color(1, 0.96, 0.88, 1)
+emission_enabled = true
+emission = Color(1, 0.96, 0.88, 1)
+emission_energy_multiplier = 1.6
+
+[sub_resource type="BoxMesh" id="CeilingLampMesh"]
+lightmap_size_hint = Vector2i(5, 7)
+add_uv2 = true
+size = Vector3(0.1, 0.002, 0.12)
+
+[node name="Room" type="Node3D" unique_id=446112484]
+
+[node name="Floor" type="MeshInstance3D" parent="." unique_id=76730477]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1075, 0.25)
+material_override = SubResource("StandardMaterial3D_v321d")
+mesh = SubResource("BoxMesh_88gup")
+
+[node name="Ceiling" type="MeshInstance3D" parent="." unique_id=1425014920]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1075, 0.25)
+material_override = SubResource("StandardMaterial3D_bisa2")
+mesh = SubResource("BoxMesh_4o3f6")
+
+[node name="LeftWall" type="MeshInstance3D" parent="." unique_id=92703246]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.172, 0, 0.25)
+material_override = SubResource("StandardMaterial3D_v5vuv")
+mesh = SubResource("BoxMesh_ka7wq")
+
+[node name="RightWall" type="MeshInstance3D" parent="." unique_id=672087980]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.172, 0, 0.25)
+material_override = SubResource("StandardMaterial3D_x5k2b")
+mesh = SubResource("BoxMesh_8cv3p")
+
+[node name="BackWall" type="MeshInstance3D" parent="." unique_id=1922798524]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.45)
+material_override = SubResource("StandardMaterial3D_01y1d")
+mesh = SubResource("BoxMesh_42v8c")
+
+[node name="TallBlock" type="MeshInstance3D" parent="." unique_id=2124350032]
+transform = Transform3D(0.95105654, 0, 0.309017, 0, 1, 0, -0.309017, 0, 0.95105654, -0.09632, -0.037625, -0.324)
+material_override = SubResource("StandardMaterial3D_mb7s7")
+mesh = SubResource("BoxMesh_xorjj")
+
+[node name="ShortBlock" type="MeshInstance3D" parent="." unique_id=638264140]
+transform = Transform3D(0.9659258, 0, -0.25881904, 0, 1, 0, 0.25881904, 0, 0.9659258, 0.0688, -0.07955, -0.1575)
+material_override = SubResource("StandardMaterial3D_xwbdb")
+mesh = SubResource("BoxMesh_voycu")
+
+[node name="Sphere" type="MeshInstance3D" parent="." unique_id=1728974986]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.1376, -0.085, -0.378)
+material_override = SubResource("StandardMaterial3D_6tcb1")
+mesh = SubResource("SphereMesh_0f4jx")
+
+[node name="LiveKey" type="SpotLight3D" parent="." unique_id=1451296685]
+transform = Transform3D(1, 0, 0, 0, 7.54979e-08, 1, 0, -1, 7.54979e-08, -0.03, 0.099, -0.1)
+light_color = Color(1, 0.92, 0.82, 1)
+light_energy = 0.4
+light_size = 0.025
+light_specular = 0.2
+shadow_enabled = true
+shadow_bias = 0.05
+shadow_normal_bias = 0.8
+shadow_opacity = 0.8
+shadow_blur = 2.0
+spot_range = 0.8
+spot_angle = 80.0
+
+[node name="FrontFill" type="SpotLight3D" parent="." unique_id=203938132]
+transform = Transform3D(0.9855848, 0.023608232, -0.16752706, 0, 0.990216, 0.13954312, 0.16918235, -0.13753158, 0.97594184, -0.12, 0.07, 0.45)
+light_color = Color(0.9, 0.94, 1, 1)
+light_energy = 0.28
+light_size = 0.025
+light_specular = 0.2
+shadow_enabled = true
+shadow_bias = 0.05
+shadow_normal_bias = 0.8
+spot_range = 1.5
+spot_angle = 65.0
+
+[node name="CeilingLamp" type="MeshInstance3D" parent="." unique_id=1041922000]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.03, 0.104, -0.1)
+material_override = SubResource("CeilingLampMaterial")
+cast_shadow = 0
+mesh = SubResource("CeilingLampMesh")
+
+[node name="LightmapGI" type="LightmapGI" parent="." unique_id=639275780]
+quality = 2
+directional = true
+interior = true
+texel_scale = 8.0
+environment_mode = 0
+light_data = ExtResource("1_88gup")
+
+[node name="RoomReflection" type="ReflectionProbe" parent="." unique_id=1162259997]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.12)
+size = Vector3(0.65, 0.4, 0.8)
+box_projection = true
+interior = true
