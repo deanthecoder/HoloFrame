@@ -26,7 +26,11 @@ class CameraSelectionTests(unittest.TestCase):
         phone, builtin = camera(1200, "phone"), camera(1201, "builtin")
         remembered = camera_key(builtin)
         phone.index, builtin.index = 1201, 1200
-        self.assertEqual(ordered_cameras([phone, builtin], remembered, None), [builtin, phone])
+        self.assertEqual(ordered_cameras([phone, builtin], remembered, None), [builtin])
+
+    def test_missing_saved_camera_requires_explicit_reset(self):
+        with self.assertRaisesRegex(RuntimeError, "--reset-camera"):
+            ordered_cameras([camera(0, "builtin")], "0:missing", None)
 
     def test_manual_index_overrides_remembered_choice(self):
         phone, builtin = camera(1200, "phone"), camera(1201, "builtin")
@@ -46,13 +50,15 @@ class CameraSelectionTests(unittest.TestCase):
         remember.assert_not_called()
         context.Process.return_value.terminate.assert_called_once()
 
-    def test_success_is_saved_once_then_switches_when_face_is_lost(self):
+    def test_success_is_saved_once_and_face_loss_keeps_camera(self):
         context = self.context([(0.1, True), (0.6, True), (1.8, False)])
+        context.Process.return_value.is_alive.side_effect = [True, True, True, False, False]
         remember = Mock()
         device = camera(1, "builtin")
         with patch("godot_tracker.time.monotonic", side_effect=[0, 0.1, 0.6, 1.8]):
             use_camera(device, True, remember, context)
         remember.assert_called_once_with(camera_key(device))
+        context.Process.return_value.terminate.assert_not_called()
 
     def test_single_camera_waits_for_face_without_reopening(self):
         context = self.context([(0.1, False), (1.2, False), (1.5, True)])

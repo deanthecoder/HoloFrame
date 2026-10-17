@@ -1,7 +1,11 @@
 # Rendering and calibration notes
 
-This is a fixed HoloFrame scene: the Cornell-style room, one teapot, two blocks,
-and one sphere. Godot 4.7 Forward+ renders it with PBR materials, live shadows,
+HoloFrame has a Cornell room scene (`main.tscn` and `scripts/cornell.gd`) and a
+framed photo gallery (`gallery.tscn` and `scripts/gallery.gd`). Both use
+`scripts/base_view.gd` for tracking, projection, calibration, and capture.
+In the gallery, the wall lies at the screen plane and the frame projects about
+2 cm toward the viewer. This makes it grow slightly as the viewer approaches.
+The room contains one teapot, two blocks, and one sphere. Godot 4.7 Forward+ renders it with PBR materials, live shadows,
 TAA, subtle SSAO and SSIL, screen-space reflections, and a small HDR glow around bright
 emitters and highlights. The same Python/MediaPipe
 tracker captures the webcam once and sends eye position and a blurred 128 × 72
@@ -27,11 +31,12 @@ From the repository root, start both processes:
 ./run_godot.sh
 ```
 
-The tracker tries the last successful camera first. With multiple cameras, it
-tries the next one after one second without a face. Devices that stop producing
-frames are also skipped. The successful device is remembered in the ignored
+On first setup, the tracker scans cameras until it detects a face, then stays on
+that device through later face loss. Later runs use only that camera, even if it
+temporarily produces no face detections. Run `./run_godot.sh --reset-camera` to
+clear the choice and scan again. The successful device is remembered in the ignored
 `.holoframe-camera.json` file; device identity is used because indices can change.
-You can still force an index with `./run_godot.sh 1`.
+You can still force an index with `./run_godot.sh 1` or `--camera-index 1`.
 Press Escape to quit and release the camera. Godot can also render without the
 tracker using its saved reference eye position and a neutral reflection image.
 

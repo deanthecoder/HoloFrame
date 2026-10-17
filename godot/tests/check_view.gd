@@ -7,11 +7,8 @@ func _initialize() -> void:
 
 func _check() -> void:
 	# Use a separate settings file so verification never changes the user's seat.
-	var script := GDScript.new()
-	script.source_code = FileAccess.get_file_as_string("res://scripts/main.gd").replace("user://calibration.cfg", "user://calibration-check.cfg")
-	assert(script.reload() == OK)
+	OS.set_environment("HOLOFRAME_CALIBRATION_PATH", "user://calibration-check.cfg")
 	var scene = load("res://main.tscn").instantiate()
-	scene.set_script(script)
 	root.add_child(scene)
 	assert(is_equal_approx(scene.screen_width_m, 0.3024))
 	# Screen corners must stay fixed under lateral, vertical, and depth movement.
@@ -69,5 +66,6 @@ func _check() -> void:
 		assert(scene.get_node("Room/" + name).cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 	assert(scene.get_node("Teapot").cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 	DirAccess.remove_absolute("user://calibration-check.cfg")
+	OS.set_environment("HOLOFRAME_CALIBRATION_PATH", "")
 	print("VIEW_CHECK: saved/legacy startup, display calibration migration, pose metadata, reflection uniforms, reset, and shadows passed")
 	quit()

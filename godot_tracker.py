@@ -36,13 +36,17 @@ def camera_key(camera) -> str:
 
 
 def ordered_cameras(cameras, remembered: str | None, explicit_index: int | None):
-    """Try the previous successful device first, unless an index was requested."""
+    """Scan on setup, but use only the saved or explicitly selected device later."""
     if explicit_index is not None:
         # CAP_ANY encodes the backend into the hundreds of the OpenCV index.
         cameras = [camera for camera in cameras if camera.index % 100 == explicit_index]
+    elif remembered is not None:
+        cameras = [camera for camera in cameras if camera_key(camera) == remembered]
+        if not cameras:
+            raise RuntimeError("Saved webcam is unavailable; run with --reset-camera to scan again")
     if not cameras:
         raise RuntimeError("No matching webcam is connected")
-    return sorted(cameras, key=lambda camera: camera_key(camera) != remembered)
+    return cameras
 
 
 def track_camera(index: int, backend: int, events, stop) -> None:
@@ -102,7 +106,7 @@ def track_camera(index: int, backend: int, events, stop) -> None:
 
 
 def use_camera(camera, allow_switch: bool, remember, context=None) -> None:
-    """Switch after a second without a face, or when a camera stops responding."""
+    """Scan only until first detection; later face loss holds this camera."""
     context = context or mp.get_context("spawn")
     events = context.Queue()
     stop = context.Event()
@@ -111,7 +115,6 @@ def use_camera(camera, allow_switch: bool, remember, context=None) -> None:
     worker.start()
     started = time.monotonic()
     last_frame = None
-    last_face = None
     first_frame = None
     remembered = False
     try:
@@ -122,11 +125,10 @@ def use_camera(camera, allow_switch: bool, remember, context=None) -> None:
                 if first_frame is None:
                     first_frame = timestamp
                 if detected:
-                    last_face = timestamp
                     if not remembered:
                         remember(camera_key(camera))
                         remembered = True
-                        print(f"[HoloFrame] Using {camera.name}; choice saved", flush=True)
+                        print(f"[HoloFrame] Using {camera.name}", flush=True)
             except Empty:
                 pass
             now = time.monotonic()
@@ -134,7 +136,7 @@ def use_camera(camera, allow_switch: bool, remember, context=None) -> None:
                 break
             if last_frame is not None and now - last_frame > 2.0:
                 break
-            if allow_switch and first_frame is not None and now - (last_face or first_frame) >= 1.0:
+            if allow_switch and not remembered and first_frame is not None and now - first_frame >= 1.0:
                 break
     finally:
         stop.set()
@@ -146,12 +148,14 @@ def use_camera(camera, allow_switch: bool, remember, context=None) -> None:
 
 
 def main() -> None:
-    """Cycle connected cameras until one sees the viewer, remembering success."""
+    """Discover once, then keep the selected webcam across face loss and runs."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--camera-index", type=int)
+    parser.add_argument("--reset-camera", action="store_true", help="forget the saved webcam and scan connected cameras again")
     args = parser.parse_args()
-    remembered = json.loads(CAMERA_SETTINGS.read_text())["camera"] if CAMERA_SETTINGS.exists() else None
-    cameras = ordered_cameras(enumerate_cameras(), remembered, args.camera_index)
+    if args.reset_camera:
+        CAMERA_SETTINGS.unlink(missing_ok=True)
+    selected = json.loads(CAMERA_SETTINGS.read_text())["camera"] if CAMERA_SETTINGS.exists() else None
 
     def stop_tracking(_signum, _frame) -> None:
         # Let the normal cleanup release the camera worker when Godot exits.
@@ -161,12 +165,18 @@ def main() -> None:
 
     def remember(key: str) -> None:
         # Only a device identifier is saved, never webcam images.
-        CAMERA_SETTINGS.write_text(json.dumps({"camera": key}))
+        nonlocal selected
+        if selected != key:
+            selected = key
+            CAMERA_SETTINGS.write_text(json.dumps({"camera": key}))
 
     try:
         while True:
+            cameras = ordered_cameras(enumerate_cameras(), selected, args.camera_index)
             for camera in cameras:
-                use_camera(camera, len(cameras) > 1, remember)
+                use_camera(camera, selected is None and args.camera_index is None and len(cameras) > 1, remember)
+                if selected is not None:
+                    break
             time.sleep(0.2)
     except KeyboardInterrupt:
         pass

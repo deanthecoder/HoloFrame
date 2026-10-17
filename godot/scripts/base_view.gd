@@ -1,5 +1,5 @@
 extends Node3D
-## Fixed room prototype using a tracked, off-axis view through the physical screen.
+## Shared tracked projection, camera reflection, calibration, and capture.
 
 const POSE_PORT := 55123
 const IMAGE_PORT := 55124
@@ -24,11 +24,9 @@ var webcam_materials: Array[ShaderMaterial] = []
 
 
 func _ready() -> void:
-	# Keep the baked room fixed; only the eye and projection move thereafter.
 	_load_display_profile()
 	_build_environment()
-	_apply_room_materials()
-	_build_objects()
+	_build_content()
 	camera = Camera3D.new()
 	camera.name = "TrackedCamera"
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
@@ -80,13 +78,15 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_tree().quit()
 	elif event.keycode == KEY_S:
 		_take_screenshot()
+	elif _handle_view_key(event):
+		pass
 	elif event.keycode == KEY_C:
 		eye_offset_mm = Vector3.ZERO if event.shift_pressed else Vector3(-target_eye_mm.x, -target_eye_mm.y, 0.0)
 		var settings := ConfigFile.new()
 		settings.set_value("view", "eye_offset_mm", eye_offset_mm)
 		settings.set_value("view", "reference_eye_mm", target_eye_mm)
 		settings.set_value("view", "webcam_position_mm", webcam_position_mm)
-		var error := settings.save(CALIBRATION_PATH)
+		var error := settings.save(_calibration_path())
 		if error != OK:
 			push_error("Could not save view calibration: %d" % error)
 		calibration_notice.text = "Measured view restored" if event.shift_pressed else "View centered — Shift+C to reset"
@@ -98,7 +98,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func _take_screenshot() -> void:
 	if screenshot_pending:
 		return
-	var downloads_dir := OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS)
+	var downloads_dir := _screenshot_dir()
 	if downloads_dir.is_empty():
 		push_error("Could not find the Downloads folder")
 		return
@@ -135,7 +135,7 @@ func _next_screenshot_path(downloads_dir: String) -> String:
 func _load_calibration() -> void:
 	# Keep the seating adjustment between runs without changing tracked distance.
 	var settings := ConfigFile.new()
-	if settings.load(CALIBRATION_PATH) == OK:
+	if settings.load(_calibration_path()) == OK:
 		eye_offset_mm = settings.get_value("view", "eye_offset_mm", Vector3.ZERO)
 		eye_mm = settings.get_value("view", "reference_eye_mm", Vector3(-eye_offset_mm.x, -eye_offset_mm.y, 600.0))
 		# Preserve the seated view when correcting the tracker's camera origin.
@@ -194,15 +194,6 @@ func _material(color: Color, roughness: float) -> ShaderMaterial:
 	return material
 
 
-func _apply_room_materials() -> void:
-	# Preserve authored colors while adding the webcam reflection to each surface.
-	for child in $Room.get_children():
-		if child is MeshInstance3D:
-			var source: StandardMaterial3D = child.material_override
-			if not source.emission_enabled:
-				child.material_override = _material(source.albedo_color, source.roughness)
-
-
 func _build_environment() -> void:
 	# A neutral sky gives every material a broad reflection.
 	var neutral_image := Image.create(128, 72, false, Image.FORMAT_RGB8)
@@ -236,25 +227,9 @@ func _build_environment() -> void:
 	environment.glow_hdr_threshold = 1.1
 	environment.glow_bloom = 0.0
 	var world := WorldEnvironment.new()
+	world.name = "WorldEnvironment"
 	world.environment = environment
 	add_child(world)
-
-
-func _build_objects() -> void:
-	# Keep the teapot in front of the physical screen, as in the first prototype.
-	var teapot_mesh = load("res://models/teapot.obj")
-	if not teapot_mesh is Mesh:
-		push_error("Could not load the teapot mesh")
-		return
-	var teapot := MeshInstance3D.new()
-	teapot.name = "Teapot"
-	teapot.mesh = teapot_mesh
-	teapot.material_override = _material(Color(0.72, 0.77, 0.80), 0.22)
-	var bounds: AABB = teapot_mesh.get_aabb()
-	var scale_factor: float = 0.15 / maxf(bounds.size.x, maxf(bounds.size.y, bounds.size.z))
-	teapot.scale = Vector3.ONE * scale_factor
-	teapot.position = -bounds.get_center() * scale_factor + Vector3(0, 0, 0.1)
-	add_child(teapot)
 
 
 func _set_capture_if_requested() -> void:
@@ -277,3 +252,21 @@ func _capture_after_delay(path: String) -> void:
 	print("HOLOFRAME_CAPTURE: ", path, " error=", error,
 		" fps=", Engine.get_frames_per_second())
 	get_tree().quit()
+
+
+func _build_content() -> void:
+	pass
+
+
+func _handle_view_key(_event: InputEventKey) -> bool:
+	return false
+
+
+func _calibration_path() -> String:
+	var override := OS.get_environment("HOLOFRAME_CALIBRATION_PATH")
+	return override if not override.is_empty() else CALIBRATION_PATH
+
+
+func _screenshot_dir() -> String:
+	var override := OS.get_environment("HOLOFRAME_SCREENSHOT_DIR")
+	return override if not override.is_empty() else OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS)

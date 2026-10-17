@@ -38,6 +38,21 @@ Then launch HoloFrame:
 ./run_godot.sh
 ```
 
+To try a 3D photo, install the optional depth model dependencies and pass a local image:
+
+```sh
+.venv/bin/python -m pip install -r requirements-photo.txt
+./run_godot.sh --photo /path/to/photo.jpg
+```
+
+The first run downloads Depth Anything V2 Small, estimates relative depth, and saves a depth map plus foreground and approximate background layers in the ignored `.holoframe-photos/` folder. The photo is processed locally and stays at its original path. The gallery scene places it in a dark frame on a lightly textured white wall with two lights and a soft shadow. Its wall is at the screen plane and the frame projects slightly toward you. Move your head gently to see the parallax. Since one photo contains no view behind its subject, uncovered areas are filled approximately and can look rough with large movements. The Cornell room still launches with `./run_godot.sh` or `./run_godot.sh --cornell`.
+
+Pass up to three `--photo PATH` pairs to switch between photos with **1**, **2**, and **3**. If you have local files named `.holoframe-photos/photo-1.jpg` through `photo-3.jpg`, `./run_godot.sh --gallery` opens that set. Those local source photos and all generated layers are ignored by Git.
+
+The repository includes one sample, [photo 3](photos/photo-3.jpg). On a fresh clone, `./run_godot.sh --gallery` opens it. The full three-photo local set takes precedence when present; photos 1 and 2 and all generated layers stay outside Git.
+
+![Photo 3 displayed in the framed gallery on a lightly textured wall](img/Gallery.png)
+
 The launcher starts both the app and its webcam tracker. Allow camera access if macOS asks, sit where you normally use your screen, and give it a moment to find your face. Press **C** to center the view on the teapot, then move your head gently to explore.
 
 ## Controls
@@ -47,6 +62,7 @@ The launcher starts both the app and its webcam tracker. Allow camera access if 
 | **C** | Center the view for your current seating position and save the adjustment. |
 | **Shift+C** | Clear the saved seating adjustment. |
 | **S** | Save a screenshot of the current view to Downloads. |
+| **1**, **2**, **3** | Switch photos when running a photo gallery. |
 | **Escape** | Quit the app and stop the webcam tracker. |
 
 Recalibrate after moving your screen or webcam. The seating adjustment changes horizontal and vertical alignment; distance and head movement remain tracked.
@@ -65,13 +81,21 @@ For another display, update the profile with the dimensions of the area used by 
 
 ## Camera setup
 
-HoloFrame tries the last successful webcam first. If several cameras are available and it doesn't find a face after a second, it tries another. This also helps when an iPhone appears as a Continuity Camera alongside the Mac's built-in camera.
+On first setup, HoloFrame scans connected webcams until one detects your face, then saves that device. Temporary face loss keeps the same webcam selected, including during that first session. Later launches use only the saved webcam. If it is disconnected or you want to scan again, run:
+
+```sh
+./run_godot.sh --reset-camera
+```
+
+The reset clears the saved choice and scans for a new one. It also works with `--gallery` or `--photo`.
 
 To choose a camera explicitly, pass its index:
 
 ```sh
 ./run_godot.sh 1
 ```
+
+You can also use `--camera-index 1` with either scene.
 
 Keep your face well lit and close other apps using the camera if tracking doesn't start. On macOS, check camera access in **System Settings → Privacy & Security → Camera**.
 
