@@ -32,24 +32,26 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-Then launch HoloFrame:
+Then launch the Cornell box:
 
 ```sh
-./run_godot.sh
+./run_cornell.sh
 ```
 
-To try a 3D photo, install the optional depth model dependencies and pass a local image:
+To open the photo gallery, install the optional depth model dependencies and run:
 
 ```sh
 .venv/bin/python -m pip install -r requirements-photo.txt
-./run_godot.sh --photo /path/to/photo.jpg
+./run_gallery.sh
 ```
 
-The first run downloads Depth Anything V2 Small, estimates relative depth, and saves a depth map plus foreground and approximate background layers in the ignored `.holoframe-photos/` folder. The photo is processed locally and stays at its original path. The gallery scene places it in a dark frame on a lightly textured white wall with two lights and a soft shadow. Its wall is at the screen plane and the frame projects slightly toward you. Move your head gently to see the parallax. Since one photo contains no view behind its subject, uncovered areas are filled approximately and can look rough with large movements. The Cornell room still launches with `./run_godot.sh` or `./run_godot.sh --cornell`.
+These shortcuts pass extra options through to `run_godot.sh`. For example, `./run_gallery.sh --photo /path/to/photo.jpg` opens a local image, and `./run_cornell.sh --reset-camera` rescans webcams. You can still use `./run_godot.sh` directly.
 
-Pass up to three `--photo PATH` pairs to switch between photos with **1**, **2**, and **3**. If you have local files named `.holoframe-photos/photo-1.jpg` through `photo-3.jpg`, `./run_godot.sh --gallery` opens that set. Those local source photos and all generated layers are ignored by Git.
+The first run downloads Depth Anything V2 Small, estimates relative depth, and saves a depth map plus foreground and approximate background layers in the ignored `.holoframe-photos/` folder. The photo is processed locally and stays at its original path. The gallery scene places it in a dark frame on a lightly textured white wall with two lights and a soft shadow. Its wall is at the screen plane and the frame projects slightly toward you. Move your head gently to see the parallax. Since one photo contains no view behind its subject, uncovered areas are filled approximately and can look rough with large movements. The Cornell room also launches with `./run_godot.sh` or `./run_godot.sh --cornell`.
 
-The repository includes one sample, [photo 3](photos/photo-3.jpg). On a fresh clone, `./run_godot.sh --gallery` opens it. The full three-photo local set takes precedence when present; photos 1 and 2 and all generated layers stay outside Git.
+Pass up to three `--photo PATH` pairs to switch between photos with **1**, **2**, and **3**. If you have local files named `.holoframe-photos/photo-1.jpg` through `photo-3.jpg`, `./run_gallery.sh` opens that set. Those local source photos and all generated layers are ignored by Git.
+
+The repository includes one sample, [photo 3](photos/photo-3.jpg). On a fresh clone, `./run_gallery.sh` opens it. The full three-photo local set takes precedence when present; photos 1 and 2 and all generated layers stay outside Git.
 
 ![Photo 3 displayed in the framed gallery on a lightly textured wall](img/Gallery.png)
 
