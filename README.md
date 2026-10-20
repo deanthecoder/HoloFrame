@@ -21,7 +21,37 @@ Captured in-app with a live webcam reflection on a 14-inch MacBook Pro with the 
 
 ## Quick start
 
-The current launcher is for **macOS**, tested on a **14-inch MacBook Pro (2021, M1 Pro)**. You'll need a webcam, [Python 3.12](https://www.python.org/downloads/), and [Godot 4.7](https://godotengine.org/download/macos/) installed as `/Applications/Godot.app`. The scene uses Godot's Forward+ renderer.
+### Windows (PowerShell)
+
+You'll need a webcam, [Python 3.12](https://www.python.org/downloads/windows/), and [Godot 4.7](https://godotengine.org/download/windows/) (the standard build; .NET is not required). Extract Godot and note the path to its `.exe`. The scene uses Godot's Forward+ renderer.
+
+Clone the project and install the gallery dependencies:
+
+```powershell
+git clone https://github.com/deanthecoder/HoloFrame.git
+cd HoloFrame
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-photo.txt
+$env:GODOT_EXE = "C:\Tools\Godot\Godot_v4.7.2-stable_win64.exe"
+.\run_gallery.cmd
+```
+
+Replace the example Godot path with your extracted executable. `GODOT_EXE` applies to the current PowerShell session; set it again in a new terminal, or pass `--godot "C:\path\to\Godot.exe"` to the launcher. Godot named `godot` or `godot4` on `PATH` is also detected. No virtual environment activation or execution-policy change is needed.
+
+To open your own photo or the Cornell box:
+
+```powershell
+.\run_gallery.cmd --photo "C:\Users\Dean\Pictures\photo.jpg"
+.\run_cornell.cmd
+```
+
+These `.cmd` shortcuts work in PowerShell and Command Prompt, use the project's virtual environment, and forward extra options to `run_godot.py`. You can also use `.\run_godot.cmd` directly (Cornell by default).
+
+For just the Cornell box, installing `requirements.txt` is sufficient. The gallery downloads its depth model on first use, so allow extra time and an internet connection for that first launch.
+
+### macOS
+
+Tested on a **14-inch MacBook Pro (2021, M1 Pro)**. Install Python 3.12 and [Godot 4.7](https://godotengine.org/download/macos/) as `/Applications/Godot.app`.
 
 Clone the project and install its Python dependencies:
 
@@ -47,15 +77,17 @@ To open the photo gallery, install the optional depth model dependencies and run
 
 These shortcuts pass extra options through to `run_godot.sh`. For example, `./run_gallery.sh --photo /path/to/photo.jpg` opens a local image, and `./run_cornell.sh --reset-camera` rescans webcams. You can still use `./run_godot.sh` directly.
 
+### Using the gallery
+
 The first run downloads Depth Anything V2 Small, estimates relative depth, and saves a depth map plus foreground and approximate background layers in the ignored `.holoframe-photos/` folder. The photo is processed locally and stays at its original path. The gallery scene places it in a dark frame on a lightly textured white wall with two lights and a soft shadow. Its wall is at the screen plane and the frame projects slightly toward you. Move your head gently to see the parallax. Since one photo contains no view behind its subject, uncovered areas are filled approximately and can look rough with large movements. The Cornell room also launches with `./run_godot.sh` or `./run_godot.sh --cornell`.
 
-Pass up to three `--photo PATH` pairs to switch between photos with **1**, **2**, and **3**. If you have local files named `.holoframe-photos/photo-1.jpg` through `photo-3.jpg`, `./run_gallery.sh` opens that set. Those local source photos and all generated layers are ignored by Git.
+Pass up to three `--photo PATH` pairs to switch between photos with **1**, **2**, and **3**. If you have local files named `.holoframe-photos/photo-1.jpg` through `photo-3.jpg`, `.\run_gallery.cmd` (or `./run_gallery.sh` on macOS) opens that set. Those local source photos and all generated layers are ignored by Git.
 
-The repository includes one sample, [photo 3](photos/photo-3.jpg). On a fresh clone, `./run_gallery.sh` opens it. The full three-photo local set takes precedence when present; photos 1 and 2 and all generated layers stay outside Git.
+The repository includes one sample, [photo 3](photos/photo-3.jpg). On a fresh clone, the gallery launcher opens it. The full three-photo local set takes precedence when present; photos 1 and 2 and all generated layers stay outside Git.
 
 ![Photo 3 displayed in the framed gallery on a lightly textured wall](img/Gallery.png)
 
-The launcher starts both the app and its webcam tracker. Allow camera access if macOS asks, sit where you normally use your screen, and give it a moment to find your face. Press **C** to center the view on the teapot, then move your head gently to explore.
+The launcher starts both the app and its webcam tracker. Allow camera access if prompted, sit where you normally use your screen, and give it a moment to find your face. Press **C** to center the view, then move your head gently to explore.
 
 ## Controls
 
@@ -85,21 +117,21 @@ For another display, update the profile with the dimensions of the area used by 
 
 On first setup, HoloFrame scans connected webcams until one detects your face, then saves that device. Temporary face loss keeps the same webcam selected, including during that first session. Later launches use only the saved webcam. If it is disconnected or you want to scan again, run:
 
-```sh
-./run_godot.sh --reset-camera
+```powershell
+.\run_gallery.cmd --reset-camera
 ```
 
 The reset clears the saved choice and scans for a new one. It also works with `--gallery` or `--photo`.
 
 To choose a camera explicitly, pass its index:
 
-```sh
-./run_godot.sh 1
+```powershell
+.\run_gallery.cmd --camera-index 1
 ```
 
-You can also use `--camera-index 1` with either scene.
+These options work with either scene. On macOS, use `./run_gallery.sh --reset-camera` or `./run_gallery.sh --camera-index 1`.
 
-Keep your face well lit and close other apps using the camera if tracking doesn't start. On macOS, check camera access in **System Settings → Privacy & Security → Camera**.
+Keep your face well lit and close other apps using the camera if tracking doesn't start. On Windows, enable camera access for desktop apps in **Settings → Privacy & security → Camera**. On macOS, check **System Settings → Privacy & Security → Camera**.
 
 Webcam frames stay on your computer. The tracker sends head position and a small, blurred image to the renderer over localhost; webcam images are neither saved nor uploaded.
 
@@ -116,23 +148,23 @@ Open [godot/project.godot](godot/project.godot) in the Godot editor to edit the 
 
 Run the Python checks from the repository root:
 
-```sh
-.venv/bin/python -m unittest -v
+```powershell
+.\.venv\Scripts\python.exe -m unittest -v
 ```
 
 Check the view, calibration, reflection inputs, and shadow settings:
 
-```sh
-/Applications/Godot.app/Contents/MacOS/Godot --path godot --script res://tests/check_view.gd
+```powershell
+& $env:GODOT_EXE --path godot --script res://tests/check_view.gd
 ```
 
 Check the in-game screenshot key with a rendered frame:
 
-```sh
-/Applications/Godot.app/Contents/MacOS/Godot --path godot --script res://tests/check_screenshot.gd
+```powershell
+& $env:GODOT_EXE --path godot --script res://tests/check_screenshot.gd
 ```
 
-See the [rendering notes](godot/README.md) for lighting settings and screenshot capture commands.
+On macOS, substitute `.venv/bin/python` and `/Applications/Godot.app/Contents/MacOS/Godot` for the executables above. See the [rendering notes](godot/README.md) for lighting settings and screenshot capture commands.
 
 </details>
 
